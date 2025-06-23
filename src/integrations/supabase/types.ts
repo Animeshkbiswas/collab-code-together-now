@@ -9,6 +9,33 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      emotion_snapshots: {
+        Row: {
+          created_at: string | null
+          emotions: Json
+          id: string
+          timestamp: number
+          user_id: string | null
+          video_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          emotions: Json
+          id?: string
+          timestamp: number
+          user_id?: string | null
+          video_id: string
+        }
+        Update: {
+          created_at?: string | null
+          emotions?: Json
+          id?: string
+          timestamp?: number
+          user_id?: string | null
+          video_id?: string
+        }
+        Relationships: []
+      }
       game_categories: {
         Row: {
           created_at: string | null
@@ -77,6 +104,119 @@ export type Database = {
           },
         ]
       }
+      learning_milestones: {
+        Row: {
+          completed: boolean | null
+          completion_time: number | null
+          created_at: string | null
+          game_type: string
+          id: string
+          milestone_percentage: number
+          score: number | null
+          user_id: string | null
+          video_id: string
+        }
+        Insert: {
+          completed?: boolean | null
+          completion_time?: number | null
+          created_at?: string | null
+          game_type: string
+          id?: string
+          milestone_percentage: number
+          score?: number | null
+          user_id?: string | null
+          video_id: string
+        }
+        Update: {
+          completed?: boolean | null
+          completion_time?: number | null
+          created_at?: string | null
+          game_type?: string
+          id?: string
+          milestone_percentage?: number
+          score?: number | null
+          user_id?: string | null
+          video_id?: string
+        }
+        Relationships: []
+      }
+      playlist_items: {
+        Row: {
+          created_at: string | null
+          duration: number | null
+          id: string
+          playlist_id: string | null
+          position: number
+          progress: number | null
+          thumbnail_url: string | null
+          title: string
+          video_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          duration?: number | null
+          id?: string
+          playlist_id?: string | null
+          position?: number
+          progress?: number | null
+          thumbnail_url?: string | null
+          title: string
+          video_id: string
+        }
+        Update: {
+          created_at?: string | null
+          duration?: number | null
+          id?: string
+          playlist_id?: string | null
+          position?: number
+          progress?: number | null
+          thumbnail_url?: string | null
+          title?: string
+          video_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "playlist_items_playlist_id_fkey"
+            columns: ["playlist_id"]
+            isOneToOne: false
+            referencedRelation: "playlists"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      playlists: {
+        Row: {
+          created_at: string | null
+          description: string | null
+          generation_criteria: Json | null
+          id: string
+          is_auto_generated: boolean | null
+          title: string
+          updated_at: string | null
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          description?: string | null
+          generation_criteria?: Json | null
+          id?: string
+          is_auto_generated?: boolean | null
+          title: string
+          updated_at?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          description?: string | null
+          generation_criteria?: Json | null
+          id?: string
+          is_auto_generated?: boolean | null
+          title?: string
+          updated_at?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -115,6 +255,8 @@ export type Database = {
           id: string
           score: number | null
           user_id: string | null
+          video_progress: number | null
+          youtube_video_id: string | null
         }
         Insert: {
           attempts?: number | null
@@ -126,6 +268,8 @@ export type Database = {
           id?: string
           score?: number | null
           user_id?: string | null
+          video_progress?: number | null
+          youtube_video_id?: string | null
         }
         Update: {
           attempts?: number | null
@@ -137,6 +281,8 @@ export type Database = {
           id?: string
           score?: number | null
           user_id?: string | null
+          video_progress?: number | null
+          youtube_video_id?: string | null
         }
         Relationships: [
           {
