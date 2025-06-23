@@ -1,16 +1,16 @@
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import YouTube, { YouTubeProps } from 'react-youtube';
 import { Card, CardContent } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Button } from '@/components/ui/button';
-import { Play, Pause, Volume2 } from 'lucide-react';
+import { Play, Pause, Volume2, Camera, CameraOff } from 'lucide-react';
 import { useEmotionAnalysis } from '@/hooks/useEmotionAnalysis';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { EmotionHeatmap } from './EmotionHeatmap';
 import { GameEngine } from './GameEngine';
 import { YouTubePlayerState } from '@/types/studysync';
+import { toast } from '@/components/ui/use-toast';
 
 interface YouTubePlayerProps {
   videoId: string;
@@ -35,6 +35,7 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
   const [showGame, setShowGame] = useState(false);
   const [currentMilestone, setCurrentMilestone] = useState<25 | 50 | 75 | null>(null);
   const [milestonesReached, setMilestonesReached] = useState<Set<number>>(new Set());
+  const [cameraPermission, setCameraPermission] = useState<'granted' | 'denied' | 'prompt'>('prompt');
   
   const playerRef = useRef<any>(null);
   const analysisIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -49,6 +50,43 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
       modestbranding: 1,
       rel: 0
     },
+  };
+
+  // Check camera permission on component mount
+  useEffect(() => {
+    checkCameraPermission();
+  }, []);
+
+  const checkCameraPermission = async () => {
+    try {
+      const result = await navigator.permissions.query({ name: 'camera' as PermissionName });
+      setCameraPermission(result.state);
+      
+      result.onchange = () => {
+        setCameraPermission(result.state);
+      };
+    } catch (error) {
+      console.log('Permission API not supported, will request when needed');
+    }
+  };
+
+  const requestCameraPermission = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      setCameraPermission('granted');
+      stream.getTracks().forEach(track => track.stop()); // Stop the stream immediately
+      toast({
+        title: "Camera Access Granted",
+        description: "Emotion analysis is now active!"
+      });
+    } catch (error) {
+      setCameraPermission('denied');
+      toast({
+        title: "Camera Access Denied",
+        description: "Emotion analysis will use mock data instead.",
+        variant: "destructive"
+      });
+    }
   };
 
   const onReady: YouTubeProps['onReady'] = (event) => {
@@ -82,7 +120,7 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
         const currentTime = playerRef.current.getCurrentTime();
         const videoElement = document.querySelector('video');
         
-        if (videoElement) {
+        if (videoElement && cameraPermission === 'granted') {
           analyzeFrame(videoElement, currentTime);
         }
 
@@ -100,7 +138,7 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
         }
       }
     }, 10000); // Every 10 seconds
-  }, [analyzeFrame, playerState.duration, onProgressUpdate, user]);
+  }, [analyzeFrame, playerState.duration, onProgressUpdate, user, cameraPermission]);
 
   const stopEmotionAnalysis = useCallback(() => {
     if (analysisIntervalRef.current) {
@@ -176,6 +214,29 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
             onStateChange={onStateChange}
             className="w-full"
           />
+          
+          {/* Camera permission indicator */}
+          <div className="absolute top-4 left-4 bg-black bg-opacity-70 text-white p-2 rounded flex items-center gap-2">
+            {cameraPermission === 'granted' ? (
+              <>
+                <Camera size={16} className="text-green-400" />
+                <span className="text-xs">Camera Active</span>
+              </>
+            ) : (
+              <>
+                <CameraOff size={16} className="text-red-400" />
+                <span className="text-xs">Camera Disabled</span>
+                <Button 
+                  size="sm" 
+                  variant="secondary" 
+                  onClick={requestCameraPermission}
+                  className="ml-2 text-xs py-1 px-2 h-auto"
+                >
+                  Enable
+                </Button>
+              </>
+            )}
+          </div>
           
           {/* Emotion indicator overlay */}
           {emotionData && (

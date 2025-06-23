@@ -5,8 +5,11 @@ import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
+import { Input } from '@/components/ui/input';
 import { Trophy, BookOpen, Target, Zap } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { YouTubePlayer } from '@/components/YouTubePlayer';
+import { toast } from '@/components/ui/use-toast';
 
 interface UserRewards {
   total_points: number;
@@ -26,7 +29,8 @@ export const Dashboard = () => {
   const navigate = useNavigate();
   const [rewards, setRewards] = useState<UserRewards | null>(null);
   const [categories, setCategories] = useState<GameCategory[]>([]);
-  const [recentGames, setRecentGames] = useState([]);
+  const [videoId, setVideoId] = useState('dQw4w9WgXcQ'); // Default video
+  const [inputVideoId, setInputVideoId] = useState('');
 
   useEffect(() => {
     if (user) {
@@ -52,6 +56,43 @@ export const Dashboard = () => {
       .limit(4);
     
     if (data) setCategories(data);
+  };
+
+  const extractVideoId = (url: string) => {
+    const match = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\n?#]+)/);
+    return match ? match[1] : url;
+  };
+
+  const handleLoadVideo = () => {
+    if (!inputVideoId.trim()) {
+      toast({
+        title: "Error",
+        description: "Please enter a YouTube URL or video ID",
+        variant: "destructive"
+      });
+      return;
+    }
+    
+    const extractedId = extractVideoId(inputVideoId.trim());
+    setVideoId(extractedId);
+    setInputVideoId('');
+    
+    toast({
+      title: "Video Loaded",
+      description: "YouTube video loaded successfully!"
+    });
+  };
+
+  const handleProgressUpdate = (progress: number) => {
+    console.log('Video progress:', progress);
+  };
+
+  const handleMilestoneReached = (milestone: number) => {
+    console.log('Milestone reached:', milestone);
+    toast({
+      title: "Milestone Reached!",
+      description: `You've reached ${milestone}% of the video!`
+    });
   };
 
   const levelProgress = rewards ? ((rewards.total_points % 1000) / 1000) * 100 : 0;
@@ -110,6 +151,91 @@ export const Dashboard = () => {
           </Card>
         </div>
 
+        {/* YouTube Player Section */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+          <div className="lg:col-span-2 space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Load YouTube Video</CardTitle>
+                <CardDescription>Enter a YouTube URL or video ID to start learning with emotion analysis</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Enter YouTube URL or video ID..."
+                    value={inputVideoId}
+                    onChange={(e) => setInputVideoId(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && handleLoadVideo()}
+                  />
+                  <Button onClick={handleLoadVideo}>Load Video</Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            <YouTubePlayer
+              videoId={videoId}
+              title="Learning Video"
+              onProgressUpdate={handleProgressUpdate}
+              onMilestoneReached={handleMilestoneReached}
+            />
+          </div>
+
+          <div className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Emotion Analysis</CardTitle>
+                <CardDescription>Real-time learning effectiveness tracking</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  <div className="text-sm">
+                    <div className="flex justify-between mb-1">
+                      <span>Engagement</span>
+                      <span className="text-green-600">Active</span>
+                    </div>
+                    <div className="flex justify-between mb-1">
+                      <span>Confusion</span>
+                      <span className="text-yellow-600">Low</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Distraction</span>
+                      <span className="text-red-600">None</span>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Learning Progress</CardTitle>
+                <CardDescription>Your progress and achievements</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  <div className="text-sm text-gray-600">Video Progress: 0%</div>
+                  <div className="text-sm text-gray-600">Milestones: 0/3</div>
+                  <div className="text-sm text-gray-600">Games Completed: 0</div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Instructions</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-sm space-y-2">
+                  <p>• Enter a YouTube video URL or ID above</p>
+                  <p>• Watch the video to trigger emotion analysis</p>
+                  <p>• Complete mini-games at 25%, 50%, and 75% progress</p>
+                  <p>• View your emotion heatmap on the progress bar</p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+
         {/* Game Categories */}
         <div className="mb-8">
           <h2 className="text-2xl font-bold text-gray-900 mb-4">Game Categories</h2>
@@ -145,7 +271,7 @@ export const Dashboard = () => {
               Browse All Games
             </Button>
             <Button variant="outline" onClick={() => navigate('/progress')} size="lg">
-              View Progress
+              View Detailed Progress
             </Button>
           </CardContent>
         </Card>
