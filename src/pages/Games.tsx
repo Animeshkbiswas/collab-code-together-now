@@ -1,12 +1,11 @@
-
 import { Navbar } from '@/components/Navbar';
-import { GamesList } from '@/components/GamesList';
+import { EducationalGames } from '@/components/EducationalGames';
 
 const Games = () => {
   return (
     <div>
       <Navbar />
-      <GamesList />
+      <EducationalGames />
     </div>
   );
 };

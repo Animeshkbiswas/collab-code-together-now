@@ -17,13 +17,17 @@ interface YouTubePlayerProps {
   title: string;
   onProgressUpdate?: (progress: number) => void;
   onMilestoneReached?: (milestone: number) => void;
+  emotionDetectionPaused: boolean;
+  setEmotionDetectionPaused: React.Dispatch<React.SetStateAction<boolean>>;
 }
 
 export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
   videoId,
   title,
   onProgressUpdate,
-  onMilestoneReached
+  onMilestoneReached,
+  emotionDetectionPaused,
+  setEmotionDetectionPaused
 }) => {
   const { user } = useAuth();
   const [playerState, setPlayerState] = useState<YouTubePlayerState>({
@@ -36,6 +40,7 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
   const [currentMilestone, setCurrentMilestone] = useState<25 | 50 | 75 | null>(null);
   const [milestonesReached, setMilestonesReached] = useState<Set<number>>(new Set());
   const [cameraPermission, setCameraPermission] = useState<'granted' | 'denied' | 'prompt'>('prompt');
+  const [lastMilestonePopup, setLastMilestonePopup] = useState<25 | 50 | 75 | null>(null);
   
   const playerRef = useRef<any>(null);
   const analysisIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -72,18 +77,40 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
 
   const requestCameraPermission = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      // First check if we can access the camera
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { 
+          width: { ideal: 640 },
+          height: { ideal: 480 }
+        } 
+      });
+      
+      // Stop the stream immediately after getting permission
+      stream.getTracks().forEach(track => track.stop());
+      
       setCameraPermission('granted');
-      stream.getTracks().forEach(track => track.stop()); // Stop the stream immediately
       toast({
         title: "Camera Access Granted",
         description: "Emotion analysis is now active!"
       });
     } catch (error) {
+      console.error('Camera permission error:', error);
       setCameraPermission('denied');
+      
+      let errorMessage = "Camera access was denied.";
+      if (error instanceof Error) {
+        if (error.name === 'NotAllowedError') {
+          errorMessage = "Camera access was denied. Please enable it in your browser settings.";
+        } else if (error.name === 'NotFoundError') {
+          errorMessage = "No camera found on your device.";
+        } else if (error.name === 'NotSupportedError') {
+          errorMessage = "Camera is not supported in your browser.";
+        }
+      }
+      
       toast({
         title: "Camera Access Denied",
-        description: "Emotion analysis will use mock data instead.",
+        description: errorMessage,
         variant: "destructive"
       });
     }
@@ -91,10 +118,20 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
 
   const onReady: YouTubeProps['onReady'] = (event) => {
     playerRef.current = event.target;
+    const saved = localStorage.getItem(`dashboard_last_video_progress_${videoId}`);
+    if (saved) {
+      const time = parseFloat(saved);
+      if (!isNaN(time) && time > 0) {
+        event.target.seekTo(time, true);
+      }
+    }
     setPlayerState(prev => ({
       ...prev,
       duration: event.target.getDuration()
     }));
+    if (cameraPermission !== 'granted') {
+      setEmotionDetectionPaused(true);
+    }
   };
 
   const onStateChange: YouTubeProps['onStateChange'] = (event) => {
@@ -104,13 +141,85 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
       playerState: event.data,
       isPlaying
     }));
-
-    if (isPlaying) {
+    if (!isPlaying) {
+      handlePauseOrStop();
+    }
+    if (isPlaying && !emotionDetectionPaused && cameraPermission === 'granted') {
       startEmotionAnalysis();
     } else {
       stopEmotionAnalysis();
     }
+    updateProgressAndEmotion();
   };
+
+  const checkMilestones = useCallback((progress: number) => {
+    const milestones = [25, 50, 75];
+    for (const milestone of milestones) {
+      if (
+        progress >= milestone &&
+        !milestonesReached.has(milestone) &&
+        lastMilestonePopup !== milestone
+      ) {
+        setMilestonesReached(prev => new Set([...prev, milestone]));
+        setCurrentMilestone(milestone as 25 | 50 | 75);
+        setShowGame(true);
+        setLastMilestonePopup(milestone as 25 | 50 | 75);
+        onMilestoneReached?.(milestone);
+        break;
+      }
+    }
+  }, [milestonesReached, onMilestoneReached, lastMilestonePopup]);
+
+  const saveVideoProgress = useCallback(async (progress: number) => {
+    if (!user) return;
+    try {
+      // Save to user_game_progress table
+      await supabase.from('user_game_progress').upsert({
+        user_id: user.id,
+        youtube_video_id: videoId,
+        video_progress: Math.floor(progress)
+      }, {
+        onConflict: 'user_id, youtube_video_id'
+      });
+      // Also save to playlist_items if this video is in any playlist
+      const { data: playlistItems } = await supabase
+        .from('playlist_items')
+        .select('id')
+        .eq('video_id', videoId);
+      if (playlistItems && playlistItems.length > 0) {
+        // Update progress for all playlist items containing this video
+        for (const item of playlistItems) {
+          await supabase
+            .from('playlist_items')
+            .update({ progress: Math.floor(progress) })
+            .eq('id', item.id);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to save progress:', error);
+    }
+  }, [user, videoId]);
+
+  const updateProgressAndEmotion = useCallback(() => {
+    if (playerRef.current) {
+      const currentTime = playerRef.current.getCurrentTime();
+      const videoElement = document.querySelector('video');
+      if (
+        videoElement &&
+        cameraPermission === 'granted' &&
+        !emotionDetectionPaused
+      ) {
+        analyzeFrame(videoElement, currentTime);
+      }
+      const progress = (currentTime / playerState.duration) * 100;
+      setPlayerState(prev => ({ ...prev, currentTime }));
+      onProgressUpdate?.(progress);
+      checkMilestones(progress);
+      if (user && !emotionDetectionPaused) {
+        saveVideoProgress(progress);
+      }
+    }
+  }, [analyzeFrame, playerState.duration, onProgressUpdate, user, cameraPermission, emotionDetectionPaused, checkMilestones, saveVideoProgress]);
 
   const startEmotionAnalysis = useCallback(() => {
     if (analysisIntervalRef.current) return;
@@ -147,35 +256,6 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
     }
   }, []);
 
-  const checkMilestones = useCallback((progress: number) => {
-    const milestones = [25, 50, 75];
-    for (const milestone of milestones) {
-      if (progress >= milestone && !milestonesReached.has(milestone)) {
-        setMilestonesReached(prev => new Set([...prev, milestone]));
-        setCurrentMilestone(milestone as 25 | 50 | 75);
-        setShowGame(true);
-        onMilestoneReached?.(milestone);
-        break;
-      }
-    }
-  }, [milestonesReached, onMilestoneReached]);
-
-  const saveVideoProgress = useCallback(async (progress: number) => {
-    if (!user) return;
-
-    try {
-      await supabase.from('user_game_progress').upsert({
-        user_id: user.id,
-        youtube_video_id: videoId,
-        video_progress: Math.floor(progress)
-      }, {
-        onConflict: 'user_id, youtube_video_id'
-      });
-    } catch (error) {
-      console.error('Failed to save progress:', error);
-    }
-  }, [user, videoId]);
-
   const handleGameComplete = useCallback((score: number) => {
     setShowGame(false);
     setCurrentMilestone(null);
@@ -199,9 +279,50 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
     };
   }, [stopEmotionAnalysis]);
 
+  // Listen for seek events
+  useEffect(() => {
+    if (!playerRef.current) return;
+    const ytPlayer = playerRef.current;
+    const onSeek = () => updateProgressAndEmotion();
+    ytPlayer.addEventListener && ytPlayer.addEventListener('onStateChange', onSeek);
+    return () => {
+      ytPlayer.removeEventListener && ytPlayer.removeEventListener('onStateChange', onSeek);
+    };
+  }, [updateProgressAndEmotion]);
+
+  // Save progress to localStorage on pause, stop, or unmount
+  useEffect(() => {
+    return () => {
+      if (playerRef.current) {
+        const currentTime = playerRef.current.getCurrentTime();
+        localStorage.setItem(`dashboard_last_video_progress_${videoId}`, String(currentTime));
+      }
+    };
+  }, [videoId]);
+
+  // Pause the video only when the popup is first shown
+  useEffect(() => {
+    if (showGame && playerRef.current && typeof playerRef.current.pauseVideo === 'function') {
+      playerRef.current.pauseVideo();
+    }
+  }, [showGame]);
+
+  const handlePauseOrStop = () => {
+    if (playerRef.current) {
+      const currentTime = playerRef.current.getCurrentTime();
+      localStorage.setItem(`dashboard_last_video_progress_${videoId}`, String(currentTime));
+    }
+  };
+
   const progressPercentage = playerState.duration > 0 
     ? (playerState.currentTime / playerState.duration) * 100 
     : 0;
+
+  // Reset milestonesReached and lastMilestonePopup when videoId changes
+  useEffect(() => {
+    setMilestonesReached(new Set());
+    setLastMilestonePopup(null);
+  }, [videoId]);
 
   return (
     <div className="space-y-4">
@@ -215,20 +336,28 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
             className="w-full"
           />
           
-          {/* Camera permission indicator */}
+          {/* Camera permission indicator and emotion detection toggle */}
           <div className="absolute top-4 left-4 bg-black bg-opacity-70 text-white p-2 rounded flex items-center gap-2">
             {cameraPermission === 'granted' ? (
               <>
                 <Camera size={16} className="text-green-400" />
-                <span className="text-xs">Camera Active</span>
+                <span className="text-xs">Emotion Analysis {emotionDetectionPaused ? 'Paused' : 'Active'}</span>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => setEmotionDetectionPaused(p => !p)}
+                  className="ml-2 text-xs py-1 px-2 h-auto"
+                >
+                  {emotionDetectionPaused ? 'Resume' : 'Pause'}
+                </Button>
               </>
             ) : (
               <>
                 <CameraOff size={16} className="text-red-400" />
-                <span className="text-xs">Camera Disabled</span>
-                <Button 
-                  size="sm" 
-                  variant="secondary" 
+                <span className="text-xs">Emotion Analysis Disabled</span>
+                <Button
+                  size="sm"
+                  variant="secondary"
                   onClick={requestCameraPermission}
                   className="ml-2 text-xs py-1 px-2 h-auto"
                 >
@@ -242,9 +371,22 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
           {emotionData && (
             <div className="absolute top-4 right-4 bg-black bg-opacity-70 text-white p-2 rounded">
               <div className="text-xs space-y-1">
-                <div>Engagement: {Math.round(emotionData.engagement)}%</div>
-                {emotionData.confusion && <div className="text-yellow-400">⚠️ Confusion detected</div>}
-                {emotionData.distraction && <div className="text-red-400">📱 Distraction detected</div>}
+                <div className="flex items-center gap-1">
+                  <div className={`w-2 h-2 rounded-full ${emotionData.engagement > 70 ? 'bg-green-400' : emotionData.engagement > 40 ? 'bg-yellow-400' : 'bg-red-400'}`}></div>
+                  <span>Engagement: {Math.round(emotionData.engagement)}%</span>
+                </div>
+                {emotionData.confusion && (
+                  <div className="flex items-center gap-1 text-yellow-400">
+                    <span>⚠️</span>
+                    <span>Confusion detected</span>
+                  </div>
+                )}
+                {emotionData.distraction && (
+                  <div className="flex items-center gap-1 text-red-400">
+                    <span>📱</span>
+                    <span>Distraction detected</span>
+                  </div>
+                )}
               </div>
             </div>
           )}
