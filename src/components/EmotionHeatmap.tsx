@@ -25,7 +25,17 @@ export const EmotionHeatmap: React.FC<EmotionHeatmapProps> = ({ videoId, duratio
         .order('timestamp');
 
       if (data) {
-        setEmotionData(data);
+        // Type cast the data to match our EmotionSnapshot interface
+        const typedData: EmotionSnapshot[] = data.map(item => ({
+          ...item,
+          emotions: item.emotions as {
+            engagement: number;
+            confusion: boolean;
+            distraction: boolean;
+            confidence: number;
+          }
+        }));
+        setEmotionData(typedData);
       }
     };
 

@@ -58,7 +58,7 @@ export const useEmotionAnalysis = (videoId: string) => {
             user_id: user.id,
             video_id: videoId,
             timestamp: Math.floor(timestamp),
-            emotions: emotions
+            emotions: emotions as any
           });
 
         } catch (error) {
