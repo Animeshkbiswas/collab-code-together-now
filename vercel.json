@@ -1,8 +1,8 @@
 {
   "version": 2,
   "functions": {
-    "api/getTranscript.cjs": {
-      "maxDuration": 30
+    "api/*.cjs": {
+      "runtime": "nodejs18.x"
     }
   },
   "routes": [
