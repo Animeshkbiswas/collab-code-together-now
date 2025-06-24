@@ -13,9 +13,10 @@ const YOUTUBE_API_KEY = import.meta.env.VITE_YOUTUBE_API_KEY;
 
 interface PlaylistManagerProps {
   onVideoSelect?: (videoId: string, title: string) => void;
+  onClose?: () => void;
 }
 
-export const PlaylistManager: React.FC<PlaylistManagerProps> = ({ onVideoSelect }) => {
+export const PlaylistManager: React.FC<PlaylistManagerProps> = ({ onVideoSelect, onClose }) => {
   const { user } = useAuth();
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -300,10 +301,26 @@ export const PlaylistManager: React.FC<PlaylistManagerProps> = ({ onVideoSelect 
         <CardHeader>
           <div className="flex justify-between items-center">
             <CardTitle>Playlists</CardTitle>
-            <Button size="sm" onClick={() => setShowCreateDialog(true)}>
-              <Plus className="h-4 w-4 mr-1" />
-              Create
-            </Button>
+            <div className="flex items-center gap-2">
+              {onClose && (
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  aria-label="Close Playlist Manager"
+                  onClick={onClose}
+                  className="text-gray-500 hover:text-red-500"
+                >
+                  <span className="sr-only">Close</span>
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </Button>
+              )}
+              <Button size="sm" onClick={() => setShowCreateDialog(true)}>
+                <Plus className="h-4 w-4 mr-1" />
+                Create
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent>
