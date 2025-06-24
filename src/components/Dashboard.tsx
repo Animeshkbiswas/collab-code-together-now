@@ -557,18 +557,16 @@ export const Dashboard = () => {
                         onKeyPress={(e) => e.key === 'Enter' && handleLoadVideo()}
                       />
                       <Button onClick={handleLoadVideo}>Load Video</Button>
-                      <Button 
-                        variant="outline" 
-                        onClick={() => {
-                          console.log('[DEBUG] Playlists button clicked');
-                          setShowPlaylistManager(true);
-                        }}
-                        className="flex items-center gap-2"
-                      >
-                        <List className="h-4 w-4" />
-                        Playlists
-                      </Button>
                     </div>
+                    <Button 
+                      variant="outline" 
+                      onClick={() => setShowPlaylistManager(true)}
+                      className="flex items-center gap-2"
+                      aria-label="Open playlist manager"
+                    >
+                      <List className="h-4 w-4" />
+                      Playlists
+                    </Button>
                   </CardContent>
                 </Card>
 
@@ -790,16 +788,17 @@ export const Dashboard = () => {
               </Card>
             </div>
 
-            {showPlaylistManager && (
-              (() => { console.log('[DEBUG] PlaylistManager modal rendering'); return null; })(),
-              <PlaylistManager
-                onVideoSelect={handleVideoSelect}
-                onClose={() => {
-                  console.log('[DEBUG] PlaylistManager onClose called');
-                  setShowPlaylistManager(false);
-                }}
-              />
-            )}
+            <Dialog open={showPlaylistManager} onOpenChange={setShowPlaylistManager}>
+              <DialogContent className="max-w-2xl w-full">
+                <PlaylistManager
+                  onVideoSelect={(videoId, title) => {
+                    setShowPlaylistManager(false);
+                    handleVideoSelect(videoId, title);
+                  }}
+                  onClose={() => setShowPlaylistManager(false)}
+                />
+              </DialogContent>
+            </Dialog>
           </div>
         </div>
       </VideoContext.Provider>
