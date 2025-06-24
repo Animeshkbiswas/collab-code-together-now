@@ -1,17 +1,16 @@
 const formidable = require('formidable');
 const fs = require('fs');
-const pdf = require('pdf-parse');
+const { createWorker } = require('tesseract.js');
 
 module.exports = async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
     return;
   }
-
   const form = new formidable.IncomingForm();
   form.parse(req, async (err, fields, files) => {
     if (err) {
-      console.error('[extractPdf] Formidable error:', err);
+      console.error('[extractImage] Formidable error:', err);
       res.status(500).json({ error: 'Failed to parse form data.' });
       return;
     }
@@ -21,12 +20,16 @@ module.exports = async (req, res) => {
         res.status(400).json({ error: 'No file uploaded.' });
         return;
       }
-      const dataBuffer = fs.readFileSync(file.filepath);
-      const data = await pdf(dataBuffer);
-      res.status(200).json({ text: data.text });
+      const imageBuffer = fs.readFileSync(file.filepath);
+      const worker = await createWorker();
+      await worker.loadLanguage('eng');
+      await worker.initialize('eng');
+      const { data: { text } } = await worker.recognize(imageBuffer);
+      await worker.terminate();
+      res.status(200).json({ text });
     } catch (e) {
-      console.error('[extractPdf] PDF parse error:', e);
-      res.status(500).json({ error: 'Failed to extract PDF text.' });
+      console.error('[extractImage] OCR error:', e);
+      res.status(500).json({ error: 'Failed to extract image text.' });
     }
   });
 }; 

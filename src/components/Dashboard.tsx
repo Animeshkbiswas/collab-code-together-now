@@ -559,7 +559,10 @@ export const Dashboard = () => {
                       <Button onClick={handleLoadVideo}>Load Video</Button>
                       <Button 
                         variant="outline" 
-                        onClick={() => setShowPlaylistManager(true)}
+                        onClick={() => {
+                          console.log('[DEBUG] Playlists button clicked');
+                          setShowPlaylistManager(true);
+                        }}
                         className="flex items-center gap-2"
                       >
                         <List className="h-4 w-4" />
@@ -788,9 +791,13 @@ export const Dashboard = () => {
             </div>
 
             {showPlaylistManager && (
+              (() => { console.log('[DEBUG] PlaylistManager modal rendering'); return null; })(),
               <PlaylistManager
                 onVideoSelect={handleVideoSelect}
-                onClose={() => setShowPlaylistManager(false)}
+                onClose={() => {
+                  console.log('[DEBUG] PlaylistManager onClose called');
+                  setShowPlaylistManager(false);
+                }}
               />
             )}
           </div>

@@ -1,4 +1,5 @@
-const { getTranscript } = require('youtube-transcript-api');
+const { getTranscript, fetchTranscript } = require('youtube-transcript-api');
+const { google } = require('googleapis');
 
 function extractVideoId(url) {
   // Handles various YouTube URL formats
@@ -11,31 +12,45 @@ function extractVideoId(url) {
   return null;
 }
 
+/**
+ * Fetches the full transcript for a YouTube video.
+ * @param {string} videoId
+ * @returns {Promise<string>}
+ */
+async function getFullTranscript(videoId) {
+  try {
+    const segments = await fetchTranscript(videoId);
+    return segments.map(s => s.text.trim()).join(' ');
+  } catch (err) {
+    // Fallback to YouTube Data API v3
+    try {
+      const youtube = google.youtube({ version: 'v3', auth: process.env.YOUTUBE_API_KEY });
+      const captionsList = await youtube.captions.list({ part: 'snippet', videoId });
+      const caption = captionsList.data.items && captionsList.data.items[0];
+      if (!caption) throw new Error('No captions found');
+      const captionId = caption.id;
+      const res = await youtube.captions.download({ id: captionId, tfmt: 'srt' }, { responseType: 'stream' });
+      let srt = '';
+      for await (const chunk of res.data) srt += chunk;
+      // Parse SRT to plain text
+      return srt.replace(/\d+\n\d{2}:\d{2}:\d{2},\d{3} --> .*\n/g, '').replace(/\n+/g, ' ').trim();
+    } catch (apiErr) {
+      console.error('[getTranscript] Error:', apiErr);
+      throw new Error('Failed to fetch transcript. Please try manual input.');
+    }
+  }
+}
+
 module.exports = async (req, res) => {
-  if (req.method !== 'POST') {
-    res.status(405).json({ error: 'Method not allowed' });
+  const { videoId } = req.query;
+  if (!videoId) {
+    res.status(400).json({ error: 'Missing videoId' });
     return;
   }
-
-  let body = '';
-  req.on('data', chunk => { body += chunk; });
-  req.on('end', async () => {
-    try {
-      const { youtubeUrl } = JSON.parse(body);
-      if (!youtubeUrl) {
-        res.status(400).json({ error: 'Missing YouTube URL' });
-        return;
-      }
-      const videoId = extractVideoId(youtubeUrl);
-      if (!videoId) {
-        res.status(400).json({ error: 'Invalid YouTube URL' });
-        return;
-      }
-      const transcript = await getTranscript(videoId);
-      const text = transcript.map(segment => segment.text).join(' ');
-      res.status(200).json({ transcript: text, segments: transcript, videoId });
-    } catch (e) {
-      res.status(500).json({ error: 'Failed to extract transcript', details: e.message });
-    }
-  });
+  try {
+    const transcript = await getFullTranscript(videoId);
+    res.status(200).json({ transcript });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Transcript extraction failed.' });
+  }
 }; 
