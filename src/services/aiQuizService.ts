@@ -8,7 +8,7 @@ import {
 } from './transcriptService';
 import {
   extractArticle,
-  extractPdf,
+  extractPDFContent,
   extractImageText,
   validateUrl,
   validatePdfFile,
@@ -360,10 +360,8 @@ const extractTextFromFile = async (file: File, options: ExtractionOptions = {}):
         // Check if it's a PDF file
         if (validatePdfFile(file)) {
             console.log('Processing PDF file');
-            const arrayBuffer = await file.arrayBuffer();
-            const buffer = Buffer.from(arrayBuffer);
-            const result = await extractPdf(buffer, file.name, options);
-            return result.content;
+            const text = await extractPDFContent(file);
+            return text;
         }
 
         // Handle text files
