@@ -388,11 +388,21 @@ export const SummarizerTab: React.FC<SummarizerTabProps> = () => {
             )}
           </Button>
 
-          {/* Error Display */}
+          {isGenerating && (
+            <div className="flex flex-col items-center justify-center my-6">
+              <Loader2 className="h-8 w-8 animate-spin text-blue-600 mb-2" />
+              <span className="text-blue-700 font-medium">Extracting and summarizing content, please wait...</span>
+            </div>
+          )}
+
           {error && (
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
-              <AlertDescription>{error}</AlertDescription>
+              <AlertDescription>
+                {error.includes('Server extraction failed') || error.includes('Failed to fetch')
+                  ? 'PDF extraction failed. The server may be unreachable or the file is not supported. Please try again later or provide the text manually.'
+                  : error}
+              </AlertDescription>
             </Alert>
           )}
 

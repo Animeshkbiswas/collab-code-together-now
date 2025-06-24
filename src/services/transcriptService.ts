@@ -217,30 +217,20 @@ export const chunkTranscript = (
 };
 
 /**
- * Gets the full transcript text from YouTube video
- * @param videoId - YouTube video ID or URL
+ * Gets full transcript text from YouTube video with API fallback
+ * @param videoIdOrUrl - YouTube video ID or URL
  * @param options - Transcript extraction options
- * @returns Promise<string> - Full transcript text
+ * @returns Promise<string>
  */
 export const getFullTranscript = async (
   videoIdOrUrl: string,
   options: TranscriptOptions = {}
 ): Promise<string> => {
   try {
-    // Extract video ID if URL is provided
     const videoId = extractVideoId(videoIdOrUrl);
+    const segments = await fetchTranscriptWithFallback(videoId, options);
     
-    // Fetch transcript segments
-    const segments = await fetchTranscript(videoId, options);
-    
-    // Concatenate segments into full transcript
-    const fullTranscript = segments
-      .map(segment => segment.text.trim())
-      .join(' ');
-    
-    console.log(`Generated full transcript (${fullTranscript.length} characters)`);
-    return fullTranscript;
-    
+    return segments.map(segment => segment.text.trim()).join(' ');
   } catch (error) {
     if (error instanceof TranscriptError) {
       throw error;
@@ -255,17 +245,32 @@ export const getFullTranscript = async (
 };
 
 /**
- * Gets chunked transcript for API processing
- * @param videoId - YouTube video ID or URL
+ * Gets chunked transcript for processing with API fallback
+ * @param videoIdOrUrl - YouTube video ID or URL
  * @param options - Transcript extraction options
- * @returns Promise<ChunkedTranscript> - Chunked transcript data
+ * @returns Promise<ChunkedTranscript>
  */
 export const getChunkedTranscript = async (
   videoIdOrUrl: string,
   options: TranscriptOptions = {}
 ): Promise<ChunkedTranscript> => {
-  const fullTranscript = await getFullTranscript(videoIdOrUrl, options);
-  return chunkTranscript(fullTranscript);
+  try {
+    const videoId = extractVideoId(videoIdOrUrl);
+    const segments = await fetchTranscriptWithFallback(videoId, options);
+    
+    const fullText = segments.map(segment => segment.text.trim()).join(' ');
+    return chunkTranscript(fullText);
+  } catch (error) {
+    if (error instanceof TranscriptError) {
+      throw error;
+    }
+    
+    throw new TranscriptError(
+      `Failed to get chunked transcript: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      'UNKNOWN',
+      videoIdOrUrl
+    );
+  }
 };
 
 /**
@@ -305,4 +310,153 @@ export const getAvailableLanguages = async (videoId: string): Promise<string[]> 
  */
 export const getTranscriptFallbackMessage = (videoId: string): string => {
   return `Transcript extraction failed for video ${videoId}. Please provide the transcript manually or ensure captions are enabled for this video.`;
+};
+
+/**
+ * Fetches transcript using Vercel API endpoint as fallback
+ * @param videoId - YouTube video ID
+ * @param options - Transcript extraction options
+ * @returns Promise<TranscriptSegment[]>
+ */
+export const fetchTranscriptViaAPI = async (
+  videoId: string,
+  options: TranscriptOptions = {}
+): Promise<TranscriptSegment[]> => {
+  const { retryAttempts = TRANSCRIPT_CONFIG.retryAttempts, retryDelay = TRANSCRIPT_CONFIG.retryDelay } = options;
+  
+  let lastError: Error | null = null;
+  
+  for (let attempt = 1; attempt <= retryAttempts; attempt++) {
+    try {
+      console.log(`Attempting to fetch transcript via API for video ${videoId} (attempt ${attempt}/${retryAttempts})`);
+      
+      // Use the Vercel API endpoint
+      const apiUrl = process.env.NODE_ENV === 'production' 
+        ? `https://${process.env.VERCEL_URL || 'your-app.vercel.app'}/api/getTranscript`
+        : '/api/getTranscript';
+      
+      const response = await fetch(`${apiUrl}?videoId=${encodeURIComponent(videoId)}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      
+      if (!data.transcript) {
+        throw new Error('No transcript data received from API');
+      }
+      
+      // Convert the transcript text back to segments format
+      // This is a simplified conversion - you might want to preserve timing if available
+      const segments: TranscriptSegment[] = data.segments || [{
+        text: data.transcript,
+        duration: 0,
+        offset: 0
+      }];
+      
+      console.log(`Successfully fetched transcript via API with ${segments.length} segments`);
+      return segments;
+      
+    } catch (error) {
+      lastError = error as Error;
+      console.warn(`API transcript fetch attempt ${attempt} failed:`, error);
+      
+      if (error instanceof Error) {
+        if (error.message.includes('No captions') || error.message.includes('No transcript')) {
+          throw new TranscriptError(
+            'No captions available for this video. Please enable captions or provide a transcript manually.',
+            'NO_CAPTIONS',
+            videoId
+          );
+        }
+        
+        if (error.message.includes('rate limit') || error.message.includes('429')) {
+          if (attempt < retryAttempts) {
+            const delay = Math.min(retryDelay * Math.pow(2, attempt - 1), TRANSCRIPT_CONFIG.maxRetryDelay);
+            console.log(`Rate limited, waiting ${delay}ms before retry...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+          throw new TranscriptError(
+            'Rate limit exceeded. Please try again later.',
+            'RATE_LIMIT',
+            videoId
+          );
+        }
+        
+        if (error.message.includes('network') || error.message.includes('fetch')) {
+          if (attempt < retryAttempts) {
+            const delay = retryDelay * attempt;
+            console.log(`Network error, waiting ${delay}ms before retry...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+          throw new TranscriptError(
+            'Network error occurred while fetching transcript. Please check your connection and try again.',
+            'NETWORK_ERROR',
+            videoId
+          );
+        }
+      }
+      
+      // If we've exhausted retries, throw the last error
+      if (attempt === retryAttempts) {
+        throw new TranscriptError(
+          `Failed to fetch transcript via API after ${retryAttempts} attempts: ${lastError?.message || 'Unknown error'}`,
+          'UNKNOWN',
+          videoId
+        );
+      }
+    }
+  }
+  
+  throw new TranscriptError(
+    'Unexpected error during API transcript extraction',
+    'UNKNOWN',
+    videoId
+  );
+};
+
+/**
+ * Enhanced transcript fetching with API fallback
+ * @param videoId - YouTube video ID
+ * @param options - Transcript extraction options
+ * @returns Promise<TranscriptSegment[]>
+ */
+export const fetchTranscriptWithFallback = async (
+  videoId: string,
+  options: TranscriptOptions = {}
+): Promise<TranscriptSegment[]> => {
+  try {
+    // First try direct YouTube API
+    console.log('Attempting direct YouTube transcript extraction...');
+    return await fetchTranscript(videoId, options);
+  } catch (error) {
+    console.log('Direct extraction failed, trying API fallback...');
+    
+    // If direct extraction fails, try the Vercel API
+    try {
+      return await fetchTranscriptViaAPI(videoId, options);
+    } catch (apiError) {
+      console.error('Both direct and API extraction failed:', { direct: error, api: apiError });
+      
+      // Re-throw the original error if API also fails
+      if (error instanceof TranscriptError) {
+        throw error;
+      }
+      
+      throw new TranscriptError(
+        `Failed to extract transcript: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        'UNKNOWN',
+        videoId
+      );
+    }
+  }
 }; 

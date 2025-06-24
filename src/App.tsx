@@ -11,7 +11,7 @@ import Games from "./pages/Games";
 import Progress from "./pages/Progress";
 import Profile from "./pages/Profile";
 import NotFound from "./pages/NotFound";
-import { SummarizerTab } from "@/components/SummarizerTab";
+import Summarizer from './pages/Summarizer';
 
 const queryClient = new QueryClient();
 
@@ -71,7 +71,7 @@ const App = () => (
           } />
           <Route path="/summarizer" element={
             <ProtectedRoute>
-              <SummarizerTab />
+              <Summarizer />
             </ProtectedRoute>
           } />
           <Route path="*" element={<NotFound />} />

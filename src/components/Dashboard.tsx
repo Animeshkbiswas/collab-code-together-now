@@ -786,6 +786,13 @@ export const Dashboard = () => {
                 </CardContent>
               </Card>
             </div>
+
+            {showPlaylistManager && (
+              <PlaylistManager
+                onVideoSelect={handleVideoSelect}
+                onClose={() => setShowPlaylistManager(false)}
+              />
+            )}
           </div>
         </div>
       </VideoContext.Provider>

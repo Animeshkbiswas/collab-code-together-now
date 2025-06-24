@@ -343,33 +343,80 @@ const extractArticleFallback = async (
 
 /**
  * Extracts text content from a PDF file
- * @param fileBuffer - PDF file buffer
+ * @param fileOrBuffer - PDF file or buffer
  * @param fileName - Original file name
  * @param options - Extraction options
  * @returns Promise<ExtractionResult> - Extracted content and metadata
  */
 export const extractPdf = async (
-  fileBuffer: Buffer,
+  fileOrBuffer: File | Buffer,
   fileName: string,
   options: ExtractionOptions = {}
 ): Promise<ExtractionResult> => {
   const startTime = Date.now();
-  
+
   try {
     console.log(`Extracting PDF content from: ${fileName}`);
-    
-    // Check if we're in browser and PDF library isn't available
-    if (isBrowser && !pdf) {
+
+    // Browser: upload to server-side API
+    if (isBrowser) {
+      if (!(fileOrBuffer instanceof File)) {
+        throw new ContentExtractionError(
+          'In the browser, extractPdf expects a File object.',
+          'UNSUPPORTED_FORMAT',
+          fileName
+        );
+      }
+      const formData = new FormData();
+      formData.append('file', fileOrBuffer, fileName);
+      const response = await fetch('/api/extractPdf', {
+        method: 'POST',
+        body: formData,
+      });
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new ContentExtractionError(
+          `Server extraction failed: ${error.error || response.statusText}`,
+          'EXTRACTION_FAILED',
+          fileName
+        );
+      }
+      const data = await response.json();
+      let content = (data.text || '').trim();
+      if (!content) {
+        throw new ContentExtractionError(
+          'No text content found in PDF. The file may be image-based or corrupted.',
+          'EXTRACTION_FAILED',
+          fileName
+        );
+      }
+      const maxLength = options.maxContentLength || EXTRACTION_CONFIG.maxContentLength;
+      if (content.length > maxLength) {
+        content = content.substring(0, maxLength) + '...';
+      }
+      const extractionTime = Date.now() - startTime;
+      return {
+        content,
+        metadata: {
+          sourceType: 'pdf',
+          fileName,
+          fileSize: fileOrBuffer.size,
+          extractionTime,
+          contentLength: content.length,
+        },
+      };
+    }
+
+    // Server: use pdf-parse
+    const fileBuffer = fileOrBuffer as Buffer;
+    if (!pdf) {
       throw new ContentExtractionError(
-        'PDF text extraction is not available in browser environments. Please use a server-side implementation or provide the text manually.',
+        'PDF text extraction is not available. Please install pdf-parse.',
         'UNSUPPORTED_FORMAT',
         fileName
       );
     }
-    
-    // Parse PDF content
     const data = await pdf(fileBuffer);
-    
     if (!data.text || data.text.trim().length === 0) {
       throw new ContentExtractionError(
         'No text content found in PDF. The file may be image-based or corrupted.',
@@ -377,20 +424,12 @@ export const extractPdf = async (
         fileName
       );
     }
-    
-    // Clean and truncate content if necessary
     let content = data.text.trim();
     const maxLength = options.maxContentLength || EXTRACTION_CONFIG.maxContentLength;
-    
     if (content.length > maxLength) {
-      console.warn(`Content truncated from ${content.length} to ${maxLength} characters`);
       content = content.substring(0, maxLength) + '...';
     }
-    
     const extractionTime = Date.now() - startTime;
-    
-    console.log(`Successfully extracted ${content.length} characters in ${extractionTime}ms`);
-    
     return {
       content,
       metadata: {
@@ -399,17 +438,14 @@ export const extractPdf = async (
         fileSize: fileBuffer.length,
         extractionTime,
         contentLength: content.length,
-        language: data.language || undefined
-      }
+        language: data.language || undefined,
+      },
     };
-    
   } catch (error) {
     console.error('PDF extraction failed:', error);
-    
     if (error instanceof ContentExtractionError) {
       throw error;
     }
-    
     throw new ContentExtractionError(
       `Failed to extract PDF content: ${error instanceof Error ? error.message : 'Unknown error'}`,
       'EXTRACTION_FAILED',

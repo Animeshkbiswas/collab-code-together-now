@@ -1,0 +1,17 @@
+{
+  "version": 2,
+  "functions": {
+    "api/getTranscript.cjs": {
+      "maxDuration": 30
+    }
+  },
+  "routes": [
+    {
+      "src": "/api/getTranscript",
+      "dest": "/api/getTranscript.cjs"
+    }
+  ],
+  "env": {
+    "NODE_ENV": "production"
+  }
+} 
