@@ -1,380 +1,348 @@
-// AI Summarizer Service
-// This service handles content summarization using Nebius AI API
+import OpenAI from 'openai';
 
+// Initialize OpenAI client with Nebius API configuration
+const client = new OpenAI({
+    baseURL: 'https://api.studio.nebius.com/v1/',
+    apiKey: import.meta.env.VITE_NEBIUS_API_KEY,
+    dangerouslyAllowBrowser: true,
+});
+
+// Configuration for Nebius API
+const NEBIUS_CONFIG = {
+    model: 'meta-llama/Meta-Llama-3.1-70B-Instruct',
+    maxTokens: 512,
+    temperature: 0.6,
+    topP: 0.9,
+};
+
+// Types
 export interface SummaryRequest {
-  type: 'text' | 'url' | 'youtube' | 'image' | 'file';
-  content?: string;
-  url?: string;
-  youtubeUrl?: string;
-  file?: File;
-  imageFile?: File;
-  length: 'short' | 'medium' | 'long';
-  style: 'bullet' | 'paragraph' | 'detailed';
+    type: 'text' | 'url' | 'youtube' | 'file' | 'image';
+    content?: string;
+    url?: string;
+    youtubeUrl?: string;
+    file?: File;
+    imageFile?: File;
+    length: 'short' | 'medium' | 'long';
+    style: 'bullet' | 'paragraph' | 'executive';
 }
 
 export interface SummaryResponse {
-  summary: string;
-  originalLength?: number;
-  summaryLength?: number;
-  compressionRatio?: number;
-  topics?: string[];
-  keywords?: string[];
-  source?: {
-    type: string;
-    url?: string;
-    title?: string;
-    fileSize?: number;
-  };
+    summary: string;
+    originalLength: number;
+    summaryLength: number;
+    compressionRatio: number;
+    topics: string[];
+    keywords: string[];
+    source: {
+        type: string;
+        url?: string;
+        fileSize?: number;
+    };
 }
 
-// Configuration for Nebius API
-const NEBIUS_API_CONFIG = {
-  baseUrl: 'https://api.studio.nebius.com/v1/chat/completions',
-  apiKey: import.meta.env.VITE_NEBIUS_API_KEY,
-  model: 'meta-llama/Meta-Llama-3.1-70B-Instruct',
-};
-
-// Debug logging for API configuration
-console.log('Nebius API Config:', {
-  baseUrl: NEBIUS_API_CONFIG.baseUrl,
-  model: NEBIUS_API_CONFIG.model,
-  hasApiKey: !!NEBIUS_API_CONFIG.apiKey,
-  apiKeyLength: NEBIUS_API_CONFIG.apiKey?.length || 0
-});
-
-async function fetchNebiusChatCompletion(messages: any[], options = {}) {
-  if (!NEBIUS_API_CONFIG.apiKey) {
-    throw new Error('Nebius API key is not configured. Please check your environment variables.');
-  }
-
-  try {
-    const requestBody = {
-      model: NEBIUS_API_CONFIG.model,
-      messages,
-      max_tokens: 512,
-      temperature: 0.6,
-      top_p: 0.9,
-      top_k: 50,
-      ...options,
-    };
-
-    console.log('Nebius API Request:', {
-      url: NEBIUS_API_CONFIG.baseUrl,
-      model: NEBIUS_API_CONFIG.model,
-      messageCount: messages.length,
-      hasApiKey: !!NEBIUS_API_CONFIG.apiKey
-    });
-
-    const res = await fetch(NEBIUS_API_CONFIG.baseUrl, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Api-Key ${NEBIUS_API_CONFIG.apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(requestBody),
-    });
-
-    if (!res.ok) {
-      const errorText = await res.text();
-      console.error('Nebius API Error Response:', {
-        status: res.status,
-        statusText: res.statusText,
-        body: errorText
-      });
-      
-      let errorMessage = `Nebius API error: ${res.status} ${res.statusText}`;
-      
-      // Try to parse error details
-      try {
-        const errorData = JSON.parse(errorText);
-        if (errorData.error?.message) {
-          errorMessage = `Nebius API error: ${errorData.error.message}`;
-        }
-      } catch (e) {
-        // If we can't parse the error, use the raw text
-        if (errorText) {
-          errorMessage = `Nebius API error: ${errorText}`;
-        }
-      }
-      
-      throw new Error(errorMessage);
-    }
-
-    const responseData = await res.json();
-    console.log('Nebius API Response:', {
-      hasChoices: !!responseData.choices,
-      choiceCount: responseData.choices?.length,
-      hasContent: !!responseData.choices?.[0]?.message?.content
-    });
-
-    return responseData;
-  } catch (error) {
-    console.error('Nebius API request failed:', error);
-    if (error instanceof Error) {
-      throw error;
-    } else {
-      throw new Error(`Nebius API request failed: ${error}`);
-    }
-  }
+export interface SummaryOptions {
+    length: 'short' | 'medium' | 'long';
+    style: 'bullet' | 'paragraph' | 'executive';
+    sourceType: string;
 }
 
-// Extract text from file (basic implementation)
-const extractTextFromFile = async (file: File): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    
-    reader.onload = (e) => {
-      try {
-        const content = e.target?.result as string;
-        resolve(content);
-      } catch (error) {
-        reject(new Error('Failed to read file content'));
-      }
-    };
-    
-    reader.onerror = () => reject(new Error('Failed to read file'));
-    
-    if (file.type === 'text/plain' || file.type === 'text/markdown') {
-      reader.readAsText(file);
-    } else {
-      // For other file types, we'll need more sophisticated parsing
-      // This is a simplified version - in production you'd want proper PDF/DOC parsing
-      reject(new Error('File type not supported yet. Please use text files.'));
+// Generate summary using Nebius API
+const generateNebiusSummary = async (content: string, options: SummaryOptions): Promise<string> => {
+    if (!import.meta.env.VITE_NEBIUS_API_KEY) {
+        throw new Error('Nebius API key is not set in the environment variables');
     }
-  });
-};
 
-// Extract text from image using OCR (placeholder)
-const extractTextFromImage = async (file: File): Promise<string> => {
-  // This is a placeholder. In a real implementation, you would:
-  // 1. Use a proper OCR service (like Tesseract.js, Google Vision API, etc.)
-  // 2. Convert image to text
-  // 3. Return the extracted text
-  
-  // For now, we'll return a placeholder message
-  return `[Image content: ${file.name}] - OCR processing not implemented yet. Please use text input for now.`;
+    try {
+        const lengthInstructions = {
+            short: 'in 2-3 sentences',
+            medium: 'in 1-2 paragraphs',
+            long: 'in 3-4 paragraphs with detailed analysis'
+        };
+
+        const styleInstructions = {
+            bullet: 'Format the summary as bullet points with key highlights',
+            paragraph: 'Write the summary in clear, flowing paragraphs',
+            executive: 'Write an executive summary focusing on key takeaways and actionable insights'
+        };
+
+        const prompt = `
+Summarize the following ${options.sourceType} content ${lengthInstructions[options.length]}.
+${styleInstructions[options.style]}.
+
+Content to summarize:
+${content}
+
+Please provide a comprehensive summary that captures the main points, key insights, and important details.
+        `;
+
+        const response = await client.chat.completions.create({
+            model: NEBIUS_CONFIG.model,
+            messages: [{ role: 'user', content: prompt }],
+            max_tokens: NEBIUS_CONFIG.maxTokens,
+            temperature: NEBIUS_CONFIG.temperature,
+            top_p: NEBIUS_CONFIG.topP,
+        });
+
+        const summary = response.choices?.[0]?.message?.content;
+        if (!summary) {
+            throw new Error('No summary generated from Nebius API');
+        }
+
+        return summary.trim();
+    } catch (error) {
+        console.error('Nebius summary generation failed:', error);
+        throw error;
+    }
 };
 
 // Extract content from URL
 const extractContentFromUrl = async (url: string): Promise<string> => {
-  try {
-    // This is a simplified version. In production, you'd want to:
-    // 1. Use a proper web scraping service
-    // 2. Handle CORS issues
-    // 3. Extract main content (not just HTML)
-    
-    const response = await fetch(`/api/scrape?url=${encodeURIComponent(url)}`);
-    if (response.ok) {
-      const data = await response.json();
-      return data.content || `[Website content from: ${url}]`;
+    try {
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+        });
+        if (response.ok) {
+            const html = await response.text();
+            const textContent = html
+                .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+                .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+                .replace(/<[^>]+>/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim();
+            if (textContent.length > 100) {
+                return textContent.substring(0, 5000);
+            }
+        }
+        throw new Error(`Failed to extract content from this website. This could be due to CORS restrictions, the site blocking automated requests, or the content being dynamically loaded. Please copy the content manually from the webpage or provide a description of what the page is about.`);
+    } catch (error) {
+        throw error;
     }
-    
-    // Fallback: return URL as placeholder
-    return `[Website content from: ${url}] - Web scraping not implemented yet. Please use text input for now.`;
-  } catch (error) {
-    return `[Website content from: ${url}] - Failed to extract content. Please use text input for now.`;
-  }
 };
 
-// Extract transcript from YouTube URL
-const extractYouTubeTranscript = async (url: string): Promise<string> => {
-  try {
-    // Extract video ID from URL
-    const videoId = extractVideoId(url);
-    if (!videoId) {
-      throw new Error('Invalid YouTube URL');
-    }
-    
-    // This is a placeholder. In production, you'd want to:
-    // 1. Use YouTube Data API or a transcript service
-    // 2. Extract actual video transcript
-    // 3. Handle different languages
-    
-    return `[YouTube video transcript: ${videoId}] - Transcript extraction not implemented yet. Please use text input for now.`;
-  } catch (error) {
-    return `[YouTube video: ${url}] - Failed to extract transcript. Please use text input for now.`;
-  }
+// Extract YouTube transcript with multiple methods
+const extractYouTubeTranscript = async (youtubeUrl: string): Promise<string> => {
+    // Browser-based extraction is not reliable due to CORS and YouTube API restrictions.
+    // You can only extract transcript if CORS allows or if you use a backend proxy.
+    throw new Error('Automatic YouTube transcript extraction is not supported in the browser. Please provide the transcript manually or use a backend proxy.');
 };
 
-// Extract video ID from YouTube URL
-const extractVideoId = (url: string): string | null => {
-  const patterns = [
-    /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\n?#]+)/,
-    /youtube\.com\/v\/([^&\n?#]+)/,
-    /youtube\.com\/watch\?.*v=([^&\n?#]+)/
-  ];
-  
-  for (const pattern of patterns) {
-    const match = url.match(pattern);
-    if (match) {
-      return match[1];
-    }
-  }
-  
-  return null;
+// Extract text from file
+const extractTextFromFile = async (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsText(file);
+    });
 };
 
-// Generate summary using Nebius API
-const generateNebiusSummary = async (content: string, options: {
-  length: string;
-  style: string;
-  sourceType: string;
-}): Promise<string> => {
-  if (!NEBIUS_API_CONFIG.apiKey) {
-    throw new Error('Nebius API key is not set in the environment variables');
-  }
-  const { length, style, sourceType } = options;
-  const lengthGuidance = {
-    short: '2-3 sentences',
-    medium: '4-6 sentences',
-    long: '8-10 sentences'
-  };
-  const styleGuidance = {
-    bullet: 'as bullet points',
-    paragraph: 'as a paragraph',
-    detailed: 'in detail with explanations'
-  };
-  
-  try {
-    const prompt = `
-      Summarize the following ${sourceType} content in ${lengthGuidance[length as keyof typeof lengthGuidance]} ${styleGuidance[style as keyof typeof styleGuidance]}.
-      
-      Content: ${content}
-      
-      Return ONLY the summary text. Do not include any additional formatting, labels, or explanations.
-    `;
-    
-    const response = await fetchNebiusChatCompletion([{ role: 'user', content: prompt }]);
-    const aiResponse = response.choices?.[0]?.message?.content;
-    
-    if (!aiResponse) {
-      console.error('No response from Nebius API', response);
-      throw new Error('No response from Nebius API');
-    }
-    
-    // Clean up the response - remove any markdown formatting or extra text
-    let summary = aiResponse.trim();
-    
-    // Remove markdown formatting if present
-    summary = summary.replace(/^#+\s*/gm, ''); // Remove headers
-    summary = summary.replace(/\*\*(.*?)\*\*/g, '$1'); // Remove bold
-    summary = summary.replace(/\*(.*?)\*/g, '$1'); // Remove italic
-    summary = summary.replace(/`(.*?)`/g, '$1'); // Remove code blocks
-    
-    // Remove any prefix like "Summary:" or "Here's the summary:"
-    summary = summary.replace(/^(summary|here's the summary|here is the summary):\s*/i, '');
-    
-    if (!summary || summary.length < 10) {
-      throw new Error('Generated summary is too short or empty');
-    }
-    
-    return summary;
-    
-  } catch (error) {
-    console.error('Nebius AI summary generation failed:', error);
-    throw error;
-  }
+// Extract text from image (placeholder)
+const extractTextFromImage = async (imageFile: File): Promise<string> => {
+    throw new Error('Image OCR is not supported in the browser.');
 };
 
 // Main summarization function
 export const generateSummary = async (request: SummaryRequest): Promise<SummaryResponse> => {
-  try {
     let content = '';
     let sourceType = 'text';
-
-    // Extract content based on request type
     switch (request.type) {
-      case 'text':
-        content = request.content || '';
-        sourceType = 'text';
-        break;
-      case 'url':
-        content = await extractContentFromUrl(request.url || '');
-        sourceType = 'website';
-        break;
-      case 'youtube':
-        content = await extractYouTubeTranscript(request.youtubeUrl || '');
-        sourceType = 'YouTube video';
-        break;
-      case 'file':
-        if (!request.file) {
-          throw new Error('No file provided');
-        }
-        content = await extractTextFromFile(request.file);
-        sourceType = 'document';
-        break;
-      case 'image':
-        if (!request.imageFile) {
-          throw new Error('No image file provided');
-        }
-        content = await extractTextFromImage(request.imageFile);
-        sourceType = 'image';
-        break;
-      default:
-        throw new Error('Invalid request type');
+        case 'text':
+            content = request.content || '';
+            sourceType = 'text';
+            break;
+        case 'url':
+            content = await extractContentFromUrl(request.url || '');
+            sourceType = 'website';
+            break;
+        case 'file':
+            if (!request.file) {
+                throw new Error('No file provided');
+            }
+            content = await extractTextFromFile(request.file);
+            sourceType = 'document';
+            break;
+        case 'image':
+            if (!request.imageFile) {
+                throw new Error('No image file provided');
+            }
+            content = await extractTextFromImage(request.imageFile);
+            sourceType = 'image';
+            break;
+        case 'youtube':
+            // Not supported in browser
+            throw new Error('Automatic YouTube transcript extraction is not supported in the browser. Please provide the transcript manually or use a backend proxy.');
+        default:
+            throw new Error('Invalid request type');
     }
-
     if (!content.trim()) {
-      throw new Error('No content to summarize');
+        throw new Error('No content to summarize');
     }
-
-    // Validate options
     if (!request.length || !request.style) {
-      throw new Error('Missing required options: length and style');
+        throw new Error('Missing required options: length and style');
     }
-
-    // Generate summary using Nebius API
     const summary = await generateNebiusSummary(content, {
-      length: request.length,
-      style: request.style,
-      sourceType: sourceType
+        length: request.length,
+        style: request.style,
+        sourceType: sourceType
     });
-
-    // Create response object
     const response: SummaryResponse = {
-      summary,
-      originalLength: content.length,
-      summaryLength: summary.length,
-      compressionRatio: content.length > 0 ? (summary.length / content.length) : 0,
-      topics: extractTopics(content),
-      keywords: extractKeywords(content),
-      source: {
-        type: request.type,
-        url: request.url || request.youtubeUrl,
-        fileSize: request.file?.size || request.imageFile?.size
-      }
+        summary,
+        originalLength: content.length,
+        summaryLength: summary.length,
+        compressionRatio: content.length > 0 ? (summary.length / content.length) : 0,
+        topics: extractTopics(content),
+        keywords: extractKeywords(content),
+        source: {
+            type: request.type,
+            url: request.url || request.youtubeUrl,
+            fileSize: request.file?.size || request.imageFile?.size
+        }
     };
-
     return response;
-  } catch (error) {
-    console.error('Summary generation failed:', error);
-    throw error;
-  }
 };
 
 // Extract topics from content (simplified)
 const extractTopics = (content: string): string[] => {
-  const words = content.toLowerCase().split(/\s+/);
-  const commonWords = new Set(['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'can', 'this', 'that', 'these', 'those', 'i', 'you', 'he', 'she', 'it', 'we', 'they', 'me', 'him', 'her', 'us', 'them']);
-  
-  const wordFreq: { [key: string]: number } = {};
-  words.forEach(word => {
-    const cleanWord = word.replace(/[^\w]/g, '');
-    if (cleanWord.length > 3 && !commonWords.has(cleanWord)) {
-      wordFreq[cleanWord] = (wordFreq[cleanWord] || 0) + 1;
-    }
-  });
+    const words = content.toLowerCase().split(/\s+/);
+    const commonWords = new Set(['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'can', 'this', 'that', 'these', 'those', 'i', 'you', 'he', 'she', 'it', 'we', 'they', 'me', 'him', 'her', 'us', 'them']);
+    
+    const wordFreq: { [key: string]: number } = {};
+    words.forEach(word => {
+        const cleanWord = word.replace(/[^\w]/g, '');
+        if (cleanWord.length > 3 && !commonWords.has(cleanWord)) {
+            wordFreq[cleanWord] = (wordFreq[cleanWord] || 0) + 1;
+        }
+    });
 
-  return Object.entries(wordFreq)
-    .sort(([,a], [,b]) => b - a)
-    .slice(0, 5)
-    .map(([word]) => word);
+    return Object.entries(wordFreq)
+        .sort(([,a], [,b]) => b - a)
+        .slice(0, 5)
+        .map(([word]) => word);
 };
 
 // Extract keywords from content (simplified)
 const extractKeywords = (content: string): string[] => {
-  // This is a simplified keyword extraction
-  // In production, you'd want to use NLP libraries or AI services
-  const topics = extractTopics(content);
-  return topics.slice(0, 10);
-}; 
+    // This is a simplified keyword extraction
+    // In production, you'd want to use NLP libraries or AI services
+    const topics = extractTopics(content);
+    return topics.slice(0, 10);
+};
+
+// Additional utility functions
+export const validateSummaryRequest = (request: SummaryRequest): { isValid: boolean; errors: string[] } => {
+    const errors: string[] = [];
+    
+    if (!request.type) {
+        errors.push('Request type is required');
+    }
+    
+    if (!request.length || !request.style) {
+        errors.push('Length and style options are required');
+    }
+    
+    switch (request.type) {
+        case 'text':
+            if (!request.content || !request.content.trim()) {
+                errors.push('Content is required for text summarization');
+            }
+            break;
+        case 'url':
+            if (!request.url || !request.url.trim()) {
+                errors.push('URL is required for URL summarization');
+            }
+            break;
+        case 'file':
+            if (!request.file) {
+                errors.push('File is required for file summarization');
+            }
+            break;
+        case 'image':
+            if (!request.imageFile) {
+                errors.push('Image file is required for image summarization');
+            }
+            break;
+    }
+    
+    return {
+        isValid: errors.length === 0,
+        errors
+    };
+};
+
+export const getSummaryMetrics = (response: SummaryResponse) => {
+    return {
+        efficiency: response.compressionRatio,
+        readabilityScore: response.summaryLength / response.originalLength,
+        topicCoverage: response.topics.length,
+        keywordDensity: response.keywords.length / response.summaryLength
+    };
+};
+
+export const generateQuizFromSummary = async (summary: string) => {
+    const prompt = `Generate 5 multiple choice questions based on the following summary. Return the questions in this exact JSON format:\n{\n  "questions": [\n    {\n      "question": "Question text here?",\n      "options": ["Option A", "Option B", "Option C", "Option D"],\n      "answer": "Correct option text"\n    }\n  ]\n}`;
+    const response = await client.chat.completions.create({
+        model: NEBIUS_CONFIG.model,
+        messages: [
+            { role: 'user', content: `${prompt}\n\nSummary:\n${summary}` }
+        ],
+        max_tokens: 800,
+        temperature: 0.7,
+    });
+    const content = response.choices?.[0]?.message?.content;
+    if (!content) throw new Error('No quiz generated from Nebius API');
+    try {
+        const startIdx = content.indexOf('{');
+        const endIdx = content.lastIndexOf('}') + 1;
+        if (startIdx !== -1 && endIdx !== 0) {
+            const jsonStr = content.substring(startIdx, endIdx);
+            const data = JSON.parse(jsonStr);
+            return data.questions;
+        } else {
+            throw new Error('No JSON found in response');
+        }
+    } catch (e) {
+        return [
+            {
+                question: 'What is the main topic discussed?',
+                options: ['Topic A', 'Topic B', 'Topic C', 'Topic D'],
+                answer: 'Topic A'
+            }
+        ];
+    }
+};
+
+export const generateMatchingPairsFromSummary = async (summary: string) => {
+    const prompt = `Based on the following summary, generate 5 term-definition pairs for a matching game. Return the pairs in this exact JSON format:\n{\n  "pairs": [\n    {\n      "term": "Term here",\n      "definition": "Definition here"\n    }\n  ]\n}`;
+    const response = await client.chat.completions.create({
+        model: NEBIUS_CONFIG.model,
+        messages: [
+            { role: 'user', content: `${prompt}\n\nSummary:\n${summary}` }
+        ],
+        max_tokens: 600,
+        temperature: 0.7,
+    });
+    const content = response.choices?.[0]?.message?.content;
+    if (!content) throw new Error('No matching pairs generated from Nebius API');
+    try {
+        const startIdx = content.indexOf('{');
+        const endIdx = content.lastIndexOf('}') + 1;
+        if (startIdx !== -1 && endIdx !== 0) {
+            const jsonStr = content.substring(startIdx, endIdx);
+            const data = JSON.parse(jsonStr);
+            return data.pairs;
+        } else {
+            throw new Error('No JSON found in response');
+        }
+    } catch (e) {
+        return [
+            {
+                term: 'Key Concept',
+                definition: 'An important idea from the summary.'
+            }
+        ];
+    }
+};
