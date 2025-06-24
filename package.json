@@ -13,6 +13,7 @@
   "dependencies": {
     "@hookform/resolvers": "^3.9.0",
     "@huggingface/inference": "^4.0.6",
+    "@mozilla/readability": "^0.6.0",
     "@radix-ui/react-accordion": "^1.2.0",
     "@radix-ui/react-alert-dialog": "^1.1.1",
     "@radix-ui/react-aspect-ratio": "^1.1.0",
@@ -48,9 +49,11 @@
     "date-fns": "^3.6.0",
     "embla-carousel-react": "^8.3.0",
     "input-otp": "^1.2.4",
+    "jsdom": "^26.1.0",
     "lucide-react": "^0.462.0",
     "next-themes": "^0.3.0",
     "openai": "^5.7.0",
+    "pdf-parse": "^1.1.1",
     "react": "^18.3.1",
     "react-day-picker": "^8.10.1",
     "react-dnd": "^16.0.1",
@@ -64,7 +67,9 @@
     "sonner": "^1.5.0",
     "tailwind-merge": "^2.5.2",
     "tailwindcss-animate": "^1.0.7",
+    "tesseract.js": "^6.0.1",
     "vaul": "^0.9.3",
+    "youtube-transcript-api": "^3.0.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {

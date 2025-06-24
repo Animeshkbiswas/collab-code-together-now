@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import YouTube, { YouTubeProps } from 'react-youtube';
+import YouTube, { YouTubePlayer as PlayerInstance, YouTubeProps } from 'react-youtube';
 import { Card, CardContent } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Button } from '@/components/ui/button';
@@ -19,6 +19,8 @@ interface YouTubePlayerProps {
   onMilestoneReached?: (milestone: number) => void;
   emotionDetectionPaused: boolean;
   setEmotionDetectionPaused: React.Dispatch<React.SetStateAction<boolean>>;
+  showGame?: boolean;
+  onCloseGame?: () => void;
 }
 
 export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
@@ -27,7 +29,9 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
   onProgressUpdate,
   onMilestoneReached,
   emotionDetectionPaused,
-  setEmotionDetectionPaused
+  setEmotionDetectionPaused,
+  showGame = false,
+  onCloseGame
 }) => {
   const { user } = useAuth();
   const [playerState, setPlayerState] = useState<YouTubePlayerState>({
@@ -36,13 +40,12 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
     playerState: -1,
     isPlaying: false
   });
-  const [showGame, setShowGame] = useState(false);
   const [currentMilestone, setCurrentMilestone] = useState<25 | 50 | 75 | null>(null);
   const [milestonesReached, setMilestonesReached] = useState<Set<number>>(new Set());
   const [cameraPermission, setCameraPermission] = useState<'granted' | 'denied' | 'prompt'>('prompt');
   const [lastMilestonePopup, setLastMilestonePopup] = useState<25 | 50 | 75 | null>(null);
   
-  const playerRef = useRef<any>(null);
+  const playerRef = useRef<PlayerInstance | null>(null);
   const analysisIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const { emotionData, analyzeFrame } = useEmotionAnalysis(videoId);
 
@@ -116,7 +119,7 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
     }
   };
 
-  const onReady: YouTubeProps['onReady'] = (event) => {
+  const onReady = (event: { target: PlayerInstance }) => {
     playerRef.current = event.target;
     const saved = localStorage.getItem(`dashboard_last_video_progress_${videoId}`);
     if (saved) {
@@ -134,41 +137,56 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
     }
   };
 
-  const onStateChange: YouTubeProps['onStateChange'] = (event) => {
+  const onStateChange = (event: { target: PlayerInstance; data: number }) => {
     const isPlaying = event.data === 1;
     setPlayerState(prev => ({
       ...prev,
       playerState: event.data,
       isPlaying
     }));
+    
     if (!isPlaying) {
       handlePauseOrStop();
     }
+    
     if (isPlaying && !emotionDetectionPaused && cameraPermission === 'granted') {
       startEmotionAnalysis();
     } else {
       stopEmotionAnalysis();
     }
+    
     updateProgressAndEmotion();
   };
 
+  // Auto-pause/resume based on showGame state
+  useEffect(() => {
+    if (showGame && playerRef.current) {
+      playerRef.current.pauseVideo();  // Pause when modal appears
+    } else if (!showGame && playerRef.current) {
+      playerRef.current.playVideo();   // Resume when modal closes
+    }
+  }, [showGame]);
+
   const checkMilestones = useCallback((progress: number) => {
+    if (showGame) return;  // Guard against re-triggering while modal is open
+
     const milestones = [25, 50, 75];
+    const lastTriggered = lastMilestonePopup;
+
     for (const milestone of milestones) {
       if (
         progress >= milestone &&
         !milestonesReached.has(milestone) &&
-        lastMilestonePopup !== milestone
+        lastTriggered !== milestone
       ) {
         setMilestonesReached(prev => new Set([...prev, milestone]));
         setCurrentMilestone(milestone as 25 | 50 | 75);
-        setShowGame(true);
         setLastMilestonePopup(milestone as 25 | 50 | 75);
         onMilestoneReached?.(milestone);
         break;
       }
     }
-  }, [milestonesReached, onMilestoneReached, lastMilestonePopup]);
+  }, [milestonesReached, showGame, onMilestoneReached, lastMilestonePopup]);
 
   const saveVideoProgress = useCallback(async (progress: number) => {
     if (!user) return;
@@ -201,53 +219,41 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
   }, [user, videoId]);
 
   const updateProgressAndEmotion = useCallback(() => {
-    if (playerRef.current) {
-      const currentTime = playerRef.current.getCurrentTime();
-      const videoElement = document.querySelector('video');
-      if (
-        videoElement &&
-        cameraPermission === 'granted' &&
-        !emotionDetectionPaused
-      ) {
-        analyzeFrame(videoElement, currentTime);
-      }
-      const progress = (currentTime / playerState.duration) * 100;
-      setPlayerState(prev => ({ ...prev, currentTime }));
+    if (!playerRef.current) return;
+
+    const currentTime = playerRef.current.getCurrentTime();
+    const duration = playerRef.current.getDuration();
+    
+    if (duration > 0) {
+      const progress = Math.floor((currentTime / duration) * 100);
+      setPlayerState(prev => ({
+        ...prev,
+        currentTime,
+        duration
+      }));
+      
       onProgressUpdate?.(progress);
       checkMilestones(progress);
-      if (user && !emotionDetectionPaused) {
-        saveVideoProgress(progress);
-      }
+      saveVideoProgress(progress);
+      
+      // Save current time to localStorage
+      localStorage.setItem(`dashboard_last_video_progress_${videoId}`, currentTime.toString());
     }
-  }, [analyzeFrame, playerState.duration, onProgressUpdate, user, cameraPermission, emotionDetectionPaused, checkMilestones, saveVideoProgress]);
+  }, [onProgressUpdate, checkMilestones, saveVideoProgress, videoId]);
 
   const startEmotionAnalysis = useCallback(() => {
-    if (analysisIntervalRef.current) return;
-
+    if (analysisIntervalRef.current) {
+      clearInterval(analysisIntervalRef.current);
+    }
+    
     analysisIntervalRef.current = setInterval(() => {
-      if (playerRef.current) {
+      if (playerRef.current && !emotionDetectionPaused) {
+        // Get current video frame for analysis
         const currentTime = playerRef.current.getCurrentTime();
-        const videoElement = document.querySelector('video');
-        
-        if (videoElement && cameraPermission === 'granted') {
-          analyzeFrame(videoElement, currentTime);
-        }
-
-        // Update progress
-        const progress = (currentTime / playerState.duration) * 100;
-        setPlayerState(prev => ({ ...prev, currentTime }));
-        onProgressUpdate?.(progress);
-
-        // Check for milestones
-        checkMilestones(progress);
-
-        // Save progress to database
-        if (user) {
-          saveVideoProgress(progress);
-        }
+        analyzeFrame(null, currentTime); // Pass null for video element since we're analyzing YouTube
       }
-    }, 10000); // Every 10 seconds
-  }, [analyzeFrame, playerState.duration, onProgressUpdate, user, cameraPermission]);
+    }, 10000); // Analyze every 10 seconds
+  }, [analyzeFrame, emotionDetectionPaused]);
 
   const stopEmotionAnalysis = useCallback(() => {
     if (analysisIntervalRef.current) {
@@ -256,172 +262,97 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
     }
   }, []);
 
-  const handleGameComplete = useCallback((score: number) => {
-    setShowGame(false);
-    setCurrentMilestone(null);
-    
-    if (user && currentMilestone) {
-      // Save milestone completion
-      supabase.from('learning_milestones').insert({
-        user_id: user.id,
-        video_id: videoId,
-        milestone_percentage: currentMilestone,
-        game_type: 'term-match', // Default game type
-        completed: true,
-        score: score
-      });
-    }
-  }, [user, videoId, currentMilestone]);
+  const handlePauseOrStop = useCallback(() => {
+    stopEmotionAnalysis();
+    updateProgressAndEmotion();
+  }, [stopEmotionAnalysis, updateProgressAndEmotion]);
 
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
       stopEmotionAnalysis();
     };
   }, [stopEmotionAnalysis]);
 
-  // Listen for seek events
+  // Set up progress tracking interval when playing
   useEffect(() => {
-    if (!playerRef.current) return;
-    const ytPlayer = playerRef.current;
-    const onSeek = () => updateProgressAndEmotion();
-    ytPlayer.addEventListener && ytPlayer.addEventListener('onStateChange', onSeek);
-    return () => {
-      ytPlayer.removeEventListener && ytPlayer.removeEventListener('onStateChange', onSeek);
-    };
-  }, [updateProgressAndEmotion]);
-
-  // Save progress to localStorage on pause, stop, or unmount
-  useEffect(() => {
-    return () => {
-      if (playerRef.current) {
-        const currentTime = playerRef.current.getCurrentTime();
-        localStorage.setItem(`dashboard_last_video_progress_${videoId}`, String(currentTime));
-      }
-    };
-  }, [videoId]);
-
-  // Pause the video only when the popup is first shown
-  useEffect(() => {
-    if (showGame && playerRef.current && typeof playerRef.current.pauseVideo === 'function') {
-      playerRef.current.pauseVideo();
+    let interval: NodeJS.Timeout | null = null;
+    
+    if (playerState.isPlaying && !showGame) {
+      interval = setInterval(() => {
+        updateProgressAndEmotion();
+      }, 1000); // Update every second
     }
-  }, [showGame]);
+    
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [playerState.isPlaying, showGame, updateProgressAndEmotion]);
 
-  const handlePauseOrStop = () => {
-    if (playerRef.current) {
-      const currentTime = playerRef.current.getCurrentTime();
-      localStorage.setItem(`dashboard_last_video_progress_${videoId}`, String(currentTime));
-    }
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
   const progressPercentage = playerState.duration > 0 
     ? (playerState.currentTime / playerState.duration) * 100 
     : 0;
 
-  // Reset milestonesReached and lastMilestonePopup when videoId changes
-  useEffect(() => {
-    setMilestonesReached(new Set());
-    setLastMilestonePopup(null);
-  }, [videoId]);
-
   return (
-    <div className="space-y-4">
-      <Card>
-        <CardContent className="p-0 relative">
+    <Card>
+      <CardContent className="p-0">
+        <div className="relative">
           <YouTube
             videoId={videoId}
             opts={opts}
             onReady={onReady}
             onStateChange={onStateChange}
-            className="w-full"
           />
           
-          {/* Camera permission indicator and emotion detection toggle */}
-          <div className="absolute top-4 left-4 bg-black bg-opacity-70 text-white p-2 rounded flex items-center gap-2">
-            {cameraPermission === 'granted' ? (
-              <>
-                <Camera size={16} className="text-green-400" />
-                <span className="text-xs">Emotion Analysis {emotionDetectionPaused ? 'Paused' : 'Active'}</span>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => setEmotionDetectionPaused(p => !p)}
-                  className="ml-2 text-xs py-1 px-2 h-auto"
-                >
-                  {emotionDetectionPaused ? 'Resume' : 'Pause'}
-                </Button>
-              </>
-            ) : (
-              <>
-                <CameraOff size={16} className="text-red-400" />
-                <span className="text-xs">Emotion Analysis Disabled</span>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={requestCameraPermission}
-                  className="ml-2 text-xs py-1 px-2 h-auto"
-                >
-                  Enable
-                </Button>
-              </>
-            )}
-          </div>
-          
-          {/* Emotion indicator overlay */}
-          {emotionData && (
-            <div className="absolute top-4 right-4 bg-black bg-opacity-70 text-white p-2 rounded">
-              <div className="text-xs space-y-1">
-                <div className="flex items-center gap-1">
-                  <div className={`w-2 h-2 rounded-full ${emotionData.engagement > 70 ? 'bg-green-400' : emotionData.engagement > 40 ? 'bg-yellow-400' : 'bg-red-400'}`}></div>
-                  <span>Engagement: {Math.round(emotionData.engagement)}%</span>
-                </div>
-                {emotionData.confusion && (
-                  <div className="flex items-center gap-1 text-yellow-400">
-                    <span>⚠️</span>
-                    <span>Confusion detected</span>
-                  </div>
-                )}
-                {emotionData.distraction && (
-                  <div className="flex items-center gap-1 text-red-400">
-                    <span>📱</span>
-                    <span>Distraction detected</span>
-                  </div>
-                )}
-              </div>
+          {/* Progress Bar with Emotion Heatmap */}
+          <div className="p-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm text-gray-600">
+                {formatTime(playerState.currentTime)} / {formatTime(playerState.duration)}
+              </span>
+              <span className="text-sm text-gray-600">{Math.floor(progressPercentage)}%</span>
             </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Progress bar with emotion heatmap */}
-      <Card>
-        <CardContent className="p-4">
-          <div className="space-y-2">
-            <div className="flex justify-between text-sm text-gray-600">
-              <span>{title}</span>
-              <span>{Math.round(progressPercentage)}% complete</span>
-            </div>
+            
             <div className="relative">
               <Progress value={progressPercentage} className="h-2" />
-              <EmotionHeatmap videoId={videoId} duration={playerState.duration} />
+              <EmotionHeatmap 
+                videoId={videoId}
+                duration={playerState.duration}
+              />
             </div>
-            <div className="flex justify-between text-xs text-gray-500">
-              <span>{Math.floor(playerState.currentTime / 60)}:{String(Math.floor(playerState.currentTime % 60)).padStart(2, '0')}</span>
-              <span>{Math.floor(playerState.duration / 60)}:{String(Math.floor(playerState.duration % 60)).padStart(2, '0')}</span>
+            
+            {/* Camera Permission Status */}
+            <div className="flex items-center justify-between mt-4">
+              <div className="flex items-center gap-2">
+                {cameraPermission === 'granted' ? (
+                  <Camera className="h-4 w-4 text-green-600" />
+                ) : (
+                  <CameraOff className="h-4 w-4 text-red-600" />
+                )}
+                <span className="text-sm text-gray-600">
+                  {cameraPermission === 'granted' ? 'Emotion Analysis Active' : 'Camera Access Required'}
+                </span>
+              </div>
+              
+              {cameraPermission !== 'granted' && (
+                <Button 
+                  onClick={requestCameraPermission} 
+                  variant="outline" 
+                  size="sm"
+                >
+                  Enable Camera
+                </Button>
+              )}
             </div>
           </div>
-        </CardContent>
-      </Card>
-
-      {/* Mini-game modal */}
-      {showGame && currentMilestone && (
-        <GameEngine
-          milestone={currentMilestone}
-          videoId={videoId}
-          onComplete={handleGameComplete}
-          onClose={() => setShowGame(false)}
-        />
-      )}
-    </div>
+        </div>
+      </CardContent>
+    </Card>
   );
 };

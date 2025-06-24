@@ -1,3 +1,16 @@
+/**
+ * Dashboard Component with Milestone-Based Game System
+ * 
+ * This component implements a milestone system that:
+ * 1. Tracks video progress and triggers milestones at 25%, 50%, and 75%
+ * 2. Shows a modal when milestones are reached
+ * 3. Allows users to play mini-games or skip
+ * 4. Automatically pauses/resumes video playback during modal display
+ * 
+ * The YouTubePlayer component handles the core milestone logic and video control,
+ * while this Dashboard component manages the UI state and modal display.
+ */
+
 import React, { useState, useEffect, useRef, useCallback, createContext } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
@@ -70,6 +83,11 @@ export const Dashboard = () => {
   const [currentVideoTitle, setCurrentVideoTitle] = useState('Learning Video');
   const webcamVideoRef = useRef<HTMLVideoElement | null>(null);
   const [emotionDetectionPaused, setEmotionDetectionPaused] = useState(true);
+
+  // Milestone system state - removed since YouTubePlayer handles this
+  const [progress, setProgress] = useState<number>(0);
+  const [showMilestoneModal, setShowMilestoneModal] = useState<boolean>(false);
+  const [currentMilestone, setCurrentMilestone] = useState<number | null>(null);
 
   const { emotionData, isAnalyzing, analyzeFrame, modelStatus, apiHealth, debugInfo, checkAPIHealth } = useEmotionAnalysis(videoId);
 
@@ -264,16 +282,23 @@ export const Dashboard = () => {
     });
   };
 
-  const handleProgressUpdate = (progress: number) => {
-    console.log('Video progress:', progress);
+  const handleProgressUpdate = (newProgress: number) => {
+    setProgress(newProgress);
   };
 
   const handleMilestoneReached = (milestone: number) => {
     console.log('Milestone reached:', milestone);
+    setCurrentMilestone(milestone);
+    setShowMilestoneModal(true);
     toast({
       title: "Milestone Reached!",
       description: `You've reached ${milestone}% of the video!`
     });
+  };
+
+  const handleCloseMilestoneModal = () => {
+    setShowMilestoneModal(false);
+    setCurrentMilestone(null);
   };
 
   const levelProgress = rewards ? ((rewards.total_points % 1000) / 1000) * 100 : 0;
@@ -315,7 +340,7 @@ export const Dashboard = () => {
   useEffect(() => {
     if (emotionData) {
       // Example: show popup if confusion or excitement is high
-      if (emotionData.confusion > 0.7) {
+      if (emotionData.confusion) {
         showMilestonePopup('High confusion detected! Need a break or help?');
       } else if (emotionData.engagement > 0.8) {
         showMilestonePopup('Great engagement! Keep it up!');
@@ -559,6 +584,39 @@ export const Dashboard = () => {
                 ) : (
                   <div className="p-8 text-center text-gray-400">No video selected.</div>
                 )}
+
+                {/* Milestone Modal */}
+                {showMilestoneModal && (
+                  <Dialog open={showMilestoneModal} onOpenChange={setShowMilestoneModal}>
+                    <DialogContent className="sm:max-w-md">
+                      <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                          <Trophy className="h-5 w-5 text-yellow-600" />
+                          Milestone Reached!
+                        </DialogTitle>
+                      </DialogHeader>
+                      <div className="space-y-4">
+                        <p className="text-center text-lg">
+                          Congratulations! You reached {currentMilestone}% progress.
+                        </p>
+                        <p className="text-center text-sm text-gray-600">
+                          Take a quick break and complete a mini-game to reinforce your learning!
+                        </p>
+                        <div className="flex justify-center gap-2">
+                          <Button onClick={handleCloseMilestoneModal} variant="outline">
+                            Skip for Now
+                          </Button>
+                          <Button onClick={() => {
+                            handleCloseMilestoneModal();
+                            navigate('/games');
+                          }}>
+                            Play Mini-Game
+                          </Button>
+                        </div>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+                )}
               </div>
 
               <div className="space-y-6">
@@ -621,8 +679,7 @@ export const Dashboard = () => {
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-2">
-                      <div className="text-sm text-gray-600">Video Progress: 0%</div>
-                      <div className="text-sm text-gray-600">Milestones: 0/3</div>
+                      <div className="text-sm text-gray-600">Video Progress: {progress}%</div>
                       <div className="text-sm text-gray-600">Games Completed: 0</div>
                     </div>
                   </CardContent>
@@ -679,9 +736,6 @@ export const Dashboard = () => {
               <CardContent className="flex flex-wrap gap-4">
                 <Button onClick={() => navigate('/games')} size="lg">
                   Browse All Games
-                </Button>
-                <Button variant="outline" onClick={() => navigate('/progress')} size="lg">
-                  View Detailed Progress
                 </Button>
               </CardContent>
             </Card>

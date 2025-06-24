@@ -34,7 +34,7 @@ const NEBIUS_CONFIG = {
 };
 
 // Types
-export interface QuizRequest {
+export interface MatchingGameRequest {
     type: 'text' | 'url' | 'youtube' | 'file' | 'image';
     content?: string;
     url?: string;
@@ -42,26 +42,25 @@ export interface QuizRequest {
     file?: File;
     imageFile?: File;
     difficulty: 'easy' | 'medium' | 'hard';
-    questionCount: number;
-    questionTypes: ('multiple-choice' | 'true-false' | 'fill-in-blank')[];
+    pairCount: number;
+    gameType: 'term-definition' | 'concept-example' | 'word-synonym' | 'question-answer';
     manualTranscript?: string; // For fallback when auto-extraction fails
     manualContent?: string; // For fallback when content extraction fails
     extractionOptions?: ExtractionOptions; // Custom extraction options
     sourceType?: string; // Type of content source for API prompts
 }
 
-export interface QuizQuestion {
+export interface MatchingPair {
     id: string;
-    type: 'multiple-choice' | 'true-false' | 'fill-in-blank';
-    question: string;
-    options?: string[];
-    correctAnswer: string;
-    explanation: string;
+    left: string;
+    right: string;
+    category?: string;
     difficulty: 'easy' | 'medium' | 'hard';
+    explanation?: string;
 }
 
-export interface QuizResponse {
-    questions: QuizQuestion[];
+export interface MatchingGameResponse {
+    pairs: MatchingPair[];
     source: {
         type: string;
         url?: string;
@@ -75,43 +74,38 @@ export interface QuizResponse {
     transcript?: string; // Include transcript in response for reference
     extractedContent?: string; // Include extracted content for reference
     metadata: {
-        totalQuestions: number;
+        totalPairs: number;
         difficulty: string;
-        questionTypes: string[];
+        gameType: string;
         estimatedTime: number; // in minutes
+        categories: string[];
     };
 }
 
 /**
- * Generate quiz questions using Nebius API with chunked content support
- * @param content - Content to generate quiz from
- * @param options - Quiz options
- * @returns Promise<QuizQuestion[]> - Generated quiz questions
+ * Generate matching pairs using Nebius API with chunked content support
+ * @param content - Content to generate pairs from
+ * @param options - Game options
+ * @returns Promise<MatchingPair[]> - Generated matching pairs
  */
-const generateNebiusQuiz = async (content: string, options: QuizRequest): Promise<QuizQuestion[]> => {
+const generateNebiusMatchingPairs = async (content: string, options: MatchingGameRequest): Promise<MatchingPair[]> => {
     if (!import.meta.env.VITE_NEBIUS_API_KEY) {
         throw new Error('Nebius API key is not set in the environment variables');
     }
 
     try {
         const difficultyInstructions = {
-            easy: 'Create simple, straightforward questions that test basic understanding',
-            medium: 'Create moderately challenging questions that test comprehension and application',
-            hard: 'Create complex questions that test deep understanding, analysis, and synthesis'
+            easy: 'Create simple, straightforward pairs that are easy to match',
+            medium: 'Create moderately challenging pairs that require some thinking',
+            hard: 'Create complex pairs that require deep understanding and analysis'
         };
 
-        const questionTypeInstructions = options.questionTypes.map(type => {
-            switch (type) {
-                case 'multiple-choice':
-                    return 'multiple-choice questions with 4 options (A, B, C, D)';
-                case 'true-false':
-                    return 'true/false questions';
-                case 'fill-in-blank':
-                    return 'fill-in-the-blank questions';
-                default:
-                    return type;
-            }
-        }).join(', ');
+        const gameTypeInstructions = {
+            'term-definition': 'Create pairs where the left side is a term/concept and the right side is its definition',
+            'concept-example': 'Create pairs where the left side is a concept and the right side is a real-world example',
+            'word-synonym': 'Create pairs where the left side is a word and the right side is its synonym or related term',
+            'question-answer': 'Create pairs where the left side is a question and the right side is its answer'
+        };
 
         // Check if content needs to be chunked
         const estimatedTokens = Math.ceil(content.length / 4); // Rough token estimation
@@ -119,33 +113,32 @@ const generateNebiusQuiz = async (content: string, options: QuizRequest): Promis
 
         if (estimatedTokens > maxTokensForContent) {
             // Content is too long, need to chunk it
-            console.log(`Content too long (${estimatedTokens} estimated tokens), chunking for quiz generation`);
-            return await generateChunkedQuiz(content, options);
+            console.log(`Content too long (${estimatedTokens} estimated tokens), chunking for matching game generation`);
+            return await generateChunkedMatchingPairs(content, options);
         }
 
         const prompt = `
-Generate ${options.questionCount} quiz questions based on the following ${options.sourceType} content.
+Generate ${options.pairCount} matching pairs based on the following ${options.sourceType} content.
 
 Requirements:
 - Difficulty: ${difficultyInstructions[options.difficulty]}
-- Question types: ${questionTypeInstructions}
-- Each question should have a clear explanation
-- Questions should test different aspects of the content
-- Avoid overly specific or trivial questions
+- Game type: ${gameTypeInstructions[options.gameType]}
+- Each pair should have a clear connection between left and right sides
+- Pairs should test different aspects of the content
+- Avoid overly specific or trivial pairs
 
-Content to base questions on:
+Content to base pairs on:
 ${content}
 
 Please format the response as a JSON array with the following structure:
 [
   {
     "id": "unique-id",
-    "type": "multiple-choice|true-false|fill-in-blank",
-    "question": "Question text",
-    "options": ["A", "B", "C", "D"] (only for multiple-choice),
-    "correctAnswer": "Correct answer",
-    "explanation": "Explanation of why this is correct",
-    "difficulty": "easy|medium|hard"
+    "left": "Left side text",
+    "right": "Right side text",
+    "category": "Optional category",
+    "difficulty": "easy|medium|hard",
+    "explanation": "Optional explanation of the connection"
   }
 ]
         `;
@@ -158,48 +151,47 @@ Please format the response as a JSON array with the following structure:
             top_p: NEBIUS_CONFIG.topP,
         });
 
-        const quizText = response.choices?.[0]?.message?.content;
-        if (!quizText) {
-            throw new Error('No quiz generated from Nebius API');
+        const pairsText = response.choices?.[0]?.message?.content;
+        if (!pairsText) {
+            throw new Error('No matching pairs generated from Nebius API');
         }
 
         // Parse JSON response
         try {
-            const questions = JSON.parse(quizText);
-            if (!Array.isArray(questions)) {
-                throw new Error('Invalid quiz format: expected array');
+            const pairs = JSON.parse(pairsText);
+            if (!Array.isArray(pairs)) {
+                throw new Error('Invalid pairs format: expected array');
             }
 
-            // Validate and clean questions
-            const validatedQuestions = questions.map((q, index) => ({
-                id: q.id || `q${index + 1}`,
-                type: q.type || 'multiple-choice',
-                question: q.question || '',
-                options: q.options || [],
-                correctAnswer: q.correctAnswer || '',
-                explanation: q.explanation || '',
-                difficulty: q.difficulty || options.difficulty
-            })).filter(q => q.question && q.correctAnswer);
+            // Validate and clean pairs
+            const validatedPairs = pairs.map((p, index) => ({
+                id: p.id || `pair${index + 1}`,
+                left: p.left || '',
+                right: p.right || '',
+                category: p.category || 'General',
+                difficulty: p.difficulty || options.difficulty,
+                explanation: p.explanation || ''
+            })).filter(p => p.left && p.right);
 
-            return validatedQuestions;
+            return validatedPairs;
         } catch (parseError) {
-            console.error('Failed to parse quiz JSON:', parseError);
-            throw new Error('Failed to parse quiz response from API');
+            console.error('Failed to parse pairs JSON:', parseError);
+            throw new Error('Failed to parse matching pairs response from API');
         }
 
     } catch (error) {
-        console.error('Nebius quiz generation failed:', error);
+        console.error('Nebius matching pairs generation failed:', error);
         throw error;
     }
 };
 
 /**
- * Generate quiz for long content by chunking and processing in parts
- * @param content - Long content to generate quiz from
- * @param options - Quiz options
- * @returns Promise<QuizQuestion[]> - Generated quiz questions
+ * Generate matching pairs for long content by chunking and processing in parts
+ * @param content - Long content to generate pairs from
+ * @param options - Game options
+ * @returns Promise<MatchingPair[]> - Generated matching pairs
  */
-const generateChunkedQuiz = async (content: string, options: QuizRequest): Promise<QuizQuestion[]> => {
+const generateChunkedMatchingPairs = async (content: string, options: MatchingGameRequest): Promise<MatchingPair[]> => {
     // Split content into chunks
     const words = content.split(/\s+/);
     const chunkSize = 2000; // Words per chunk
@@ -209,25 +201,25 @@ const generateChunkedQuiz = async (content: string, options: QuizRequest): Promi
         chunks.push(words.slice(i, i + chunkSize).join(' '));
     }
 
-    console.log(`Processing ${chunks.length} chunks for quiz generation`);
+    console.log(`Processing ${chunks.length} chunks for matching game generation`);
 
-    // Generate questions for each chunk
-    const chunkQuestions = await Promise.all(
+    // Generate pairs for each chunk
+    const chunkPairs = await Promise.all(
         chunks.map(async (chunk, index) => {
             try {
-                const questionsPerChunk = Math.ceil(options.questionCount / chunks.length);
+                const pairsPerChunk = Math.ceil(options.pairCount / chunks.length);
                 const chunkPrompt = `
-Generate ${questionsPerChunk} quiz questions based on this part ${index + 1} of ${chunks.length} of the content.
+Generate ${pairsPerChunk} matching pairs based on this part ${index + 1} of ${chunks.length} of the content.
 
 Requirements:
 - Difficulty: ${options.difficulty}
-- Question types: ${options.questionTypes.join(', ')}
+- Game type: ${options.gameType}
 - Focus on key concepts and important information from this section
 
 Content:
 ${chunk}
 
-Format as JSON array with questions.
+Format as JSON array with pairs.
                 `;
 
                 const response = await client.chat.completions.create({
@@ -238,45 +230,44 @@ Format as JSON array with questions.
                     top_p: 0.9,
                 });
 
-                const quizText = response.choices?.[0]?.message?.content;
-                if (!quizText) return [];
+                const pairsText = response.choices?.[0]?.message?.content;
+                if (!pairsText) return [];
 
                 try {
-                    const questions = JSON.parse(quizText);
-                    return Array.isArray(questions) ? questions : [];
+                    const pairs = JSON.parse(pairsText);
+                    return Array.isArray(pairs) ? pairs : [];
                 } catch {
                     return [];
                 }
             } catch (error) {
-                console.warn(`Failed to generate questions for chunk ${index + 1}:`, error);
+                console.warn(`Failed to generate pairs for chunk ${index + 1}:`, error);
                 return [];
             }
         })
     );
 
-    // Combine and deduplicate questions
-    const allQuestions = chunkQuestions.flat().filter(q => q.question && q.correctAnswer);
+    // Combine and deduplicate pairs
+    const allPairs = chunkPairs.flat().filter(p => p.left && p.right);
     
-    // Remove duplicates based on question text
-    const uniqueQuestions = allQuestions.filter((q, index, self) => 
-        index === self.findIndex(question => question.question === q.question)
+    // Remove duplicates based on left side text
+    const uniquePairs = allPairs.filter((p, index, self) => 
+        index === self.findIndex(pair => pair.left === p.left)
     );
 
-    // Limit to requested number of questions
-    const finalQuestions = uniqueQuestions.slice(0, options.questionCount);
+    // Limit to requested number of pairs
+    const finalPairs = uniquePairs.slice(0, options.pairCount);
 
-    if (finalQuestions.length === 0) {
-        throw new Error('Failed to generate any valid quiz questions');
+    if (finalPairs.length === 0) {
+        throw new Error('Failed to generate any valid matching pairs');
     }
 
-    return finalQuestions.map((q, index) => ({
-        id: q.id || `q${index + 1}`,
-        type: q.type || 'multiple-choice',
-        question: q.question,
-        options: q.options || [],
-        correctAnswer: q.correctAnswer,
-        explanation: q.explanation || 'No explanation provided',
-        difficulty: q.difficulty || options.difficulty
+    return finalPairs.map((p, index) => ({
+        id: p.id || `pair${index + 1}`,
+        left: p.left,
+        right: p.right,
+        category: p.category || 'General',
+        difficulty: p.difficulty || options.difficulty,
+        explanation: p.explanation || ''
     }));
 };
 
@@ -427,11 +418,11 @@ const extractTextFromImage = async (imageFile: File, options: ExtractionOptions 
 };
 
 /**
- * Main quiz generation function with enhanced content extraction
- * @param request - Quiz request
- * @returns Promise<QuizResponse> - Quiz response with metadata
+ * Main matching game generation function with enhanced content extraction
+ * @param request - Matching game request
+ * @returns Promise<MatchingGameResponse> - Matching game response with metadata
  */
-export const generateQuiz = async (request: QuizRequest): Promise<QuizResponse> => {
+export const generateMatchingGame = async (request: MatchingGameRequest): Promise<MatchingGameResponse> => {
     let content = '';
     let sourceType = 'text';
     let videoId: string | undefined;
@@ -447,7 +438,7 @@ export const generateQuiz = async (request: QuizRequest): Promise<QuizResponse> 
                 break;
             case 'url':
                 if (!request.url) {
-                    throw new Error('URL is required for URL quiz generation');
+                    throw new Error('URL is required for URL matching game generation');
                 }
                 const urlResult = await extractContentFromUrl(request.url, request.extractionOptions);
                 content = urlResult;
@@ -456,7 +447,7 @@ export const generateQuiz = async (request: QuizRequest): Promise<QuizResponse> 
                 break;
             case 'file':
                 if (!request.file) {
-                    throw new Error('File is required for file quiz generation');
+                    throw new Error('File is required for file matching game generation');
                 }
                 const fileResult = await extractTextFromFile(request.file, request.extractionOptions);
                 content = fileResult;
@@ -465,7 +456,7 @@ export const generateQuiz = async (request: QuizRequest): Promise<QuizResponse> 
                 break;
             case 'image':
                 if (!request.imageFile) {
-                    throw new Error('Image file is required for image quiz generation');
+                    throw new Error('Image file is required for image matching game generation');
                 }
                 const imageResult = await extractTextFromImage(request.imageFile, request.extractionOptions);
                 content = imageResult;
@@ -474,7 +465,7 @@ export const generateQuiz = async (request: QuizRequest): Promise<QuizResponse> 
                 break;
             case 'youtube':
                 if (!request.youtubeUrl) {
-                    throw new Error('YouTube URL is required for YouTube quiz generation');
+                    throw new Error('YouTube URL is required for YouTube matching game generation');
                 }
                 
                 // Extract video ID for metadata
@@ -495,25 +486,28 @@ export const generateQuiz = async (request: QuizRequest): Promise<QuizResponse> 
         }
 
         if (!content.trim()) {
-            throw new Error('No content to generate quiz from');
+            throw new Error('No content to generate matching game from');
         }
 
-        if (!request.difficulty || !request.questionCount || !request.questionTypes) {
-            throw new Error('Missing required options: difficulty, questionCount, and questionTypes');
+        if (!request.difficulty || !request.pairCount || !request.gameType) {
+            throw new Error('Missing required options: difficulty, pairCount, and gameType');
         }
 
-        const questions = await generateNebiusQuiz(content, request);
+        const pairs = await generateNebiusMatchingPairs(content, request);
 
-        // Calculate estimated time based on question count and difficulty
-        const timePerQuestion = {
-            easy: 1,
-            medium: 2,
-            hard: 3
+        // Calculate estimated time based on pair count and difficulty
+        const timePerPair = {
+            easy: 0.5,
+            medium: 1,
+            hard: 1.5
         };
-        const estimatedTime = questions.length * timePerQuestion[request.difficulty];
+        const estimatedTime = pairs.length * timePerPair[request.difficulty];
 
-        const response: QuizResponse = {
-            questions,
+        // Extract unique categories
+        const categories = [...new Set(pairs.map(p => p.category).filter(Boolean))];
+
+        const response: MatchingGameResponse = {
+            pairs,
             source: {
                 type: request.type,
                 url: request.url || request.youtubeUrl,
@@ -525,17 +519,18 @@ export const generateQuiz = async (request: QuizRequest): Promise<QuizResponse> 
             transcript: transcript,
             extractedContent: extractedContent,
             metadata: {
-                totalQuestions: questions.length,
+                totalPairs: pairs.length,
                 difficulty: request.difficulty,
-                questionTypes: request.questionTypes,
-                estimatedTime
+                gameType: request.gameType,
+                estimatedTime,
+                categories
             }
         };
 
         return response;
 
     } catch (error) {
-        console.error('Quiz generation failed:', error);
+        console.error('Matching game generation failed:', error);
         
         // Provide helpful error messages for common issues
         if (error instanceof TranscriptError) {
@@ -550,3 +545,49 @@ export const generateQuiz = async (request: QuizRequest): Promise<QuizResponse> 
         throw error;
     }
 };
+
+/**
+ * Shuffle matching pairs for game play
+ * @param pairs - Array of matching pairs
+ * @returns MatchingPair[] - Shuffled pairs
+ */
+export const shuffleMatchingPairs = (pairs: MatchingPair[]): MatchingPair[] => {
+    const shuffled = [...pairs];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled;
+};
+
+/**
+ * Validate matching game pairs
+ * @param pairs - Array of matching pairs
+ * @returns { isValid: boolean; errors: string[] } - Validation result
+ */
+export const validateMatchingGame = (pairs: MatchingPair[]): { isValid: boolean; errors: string[] } => {
+    const errors: string[] = [];
+    
+    if (pairs.length === 0) {
+        errors.push('Matching game must have at least one pair');
+    }
+    
+    pairs.forEach((pair, index) => {
+        if (!pair.left.trim()) {
+            errors.push(`Pair ${index + 1} left side is empty`);
+        }
+        
+        if (!pair.right.trim()) {
+            errors.push(`Pair ${index + 1} right side is empty`);
+        }
+        
+        if (pair.left === pair.right) {
+            errors.push(`Pair ${index + 1} left and right sides are identical`);
+        }
+    });
+    
+    return {
+        isValid: errors.length === 0,
+        errors
+    };
+}; 
