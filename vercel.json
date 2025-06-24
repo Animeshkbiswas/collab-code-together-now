@@ -1,9 +1,7 @@
 {
   "version": 2,
   "functions": {
-    "api/*.cjs": {
-      "runtime": "nodejs18.x"
-    }
+    "api/*.cjs": {}
   },
   "routes": [
     {
