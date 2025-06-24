@@ -153,11 +153,20 @@ export const YouTubeAIWorkflow: React.FC = () => {
                 />
               </div>
 
+              {loading && (
+                <div className="flex flex-col items-center justify-center my-6">
+                  <Loader2 className="h-8 w-8 animate-spin text-blue-600 mb-2" />
+                  <span className="text-blue-700 font-medium">Extracting transcript and generating content, please wait...</span>
+                </div>
+              )}
+
               {error && (
                 <Alert variant="destructive">
                   <AlertCircle className="h-4 w-4" />
                   <AlertDescription className="whitespace-pre-line">
-                    {error}
+                    {error.includes('transcript') || error.includes('Failed to fetch')
+                      ? 'Transcript extraction failed. The server may be unreachable, the video may not have captions, or the file is not supported. Please try again later, try a different video, or provide the transcript manually.'
+                      : error}
                   </AlertDescription>
                 </Alert>
               )}

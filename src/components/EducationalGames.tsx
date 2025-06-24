@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
-import { Clock, Star, Gamepad2, Brain, Loader2, Download, Settings, Key, Video, HelpCircle } from 'lucide-react';
+import { Clock, Star, Gamepad2, Brain, Loader2, Download, Settings, Key, Video, HelpCircle, Alert, AlertCircle, AlertDescription } from 'lucide-react';
 import { generateQuiz, QuizQuestion, QuizGenerationRequest, getApiKey, storeApiKey, clearApiKey } from '@/services/aiQuizService';
 import { VideoContext } from './Dashboard';
 

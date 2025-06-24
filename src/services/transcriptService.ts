@@ -226,18 +226,32 @@ export const getFullTranscript = async (
   videoIdOrUrl: string,
   options: TranscriptOptions = {}
 ): Promise<string> => {
+  const isBrowser = typeof window !== 'undefined';
   try {
-    const videoId = extractVideoId(videoIdOrUrl);
-    const segments = await fetchTranscriptWithFallback(videoId, options);
-    
-    return segments.map(segment => segment.text.trim()).join(' ');
-  } catch (error) {
-    if (error instanceof TranscriptError) {
-      throw error;
+    if (isBrowser) {
+      // Use serverless API endpoint in browser
+      const response = await fetch('/api/getTranscript', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ youtubeUrl: videoIdOrUrl }),
+      });
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.error || response.statusText);
+      }
+      const data = await response.json();
+      if (!data.transcript) {
+        throw new Error('No transcript returned from server');
+      }
+      return data.transcript;
     }
-    
+    // Server-side: use youtube-transcript-api directly
+    const videoId = extractVideoId(videoIdOrUrl);
+    const segments = await fetchTranscript(videoId, options);
+    return segments.map(s => s.text).join(' ');
+  } catch (error) {
     throw new TranscriptError(
-      `Failed to get transcript: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      `Failed to extract transcript: ${error instanceof Error ? error.message : 'Unknown error'}`,
       'UNKNOWN',
       videoIdOrUrl
     );
