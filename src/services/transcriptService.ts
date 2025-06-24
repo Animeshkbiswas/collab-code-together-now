@@ -216,6 +216,10 @@ export const chunkTranscript = (
   };
 };
 
+const API_BASE = process.env.NODE_ENV === 'production'
+  ? `https://${process.env.VERCEL_URL}`
+  : '';
+
 /**
  * Gets full transcript text from YouTube video with API fallback
  * @param videoIdOrUrl - YouTube video ID or URL
@@ -229,11 +233,15 @@ export const getFullTranscript = async (
   const isBrowser = typeof window !== 'undefined';
   try {
     if (isBrowser) {
-      // Use serverless API endpoint in browser (GET)
+      // Use environment-based API endpoint in browser (GET)
       const videoId = extractVideoId(videoIdOrUrl);
-      const response = await fetch(`/api/getTranscript?videoId=${encodeURIComponent(videoId)}`);
+      const response = await fetch(`${API_BASE}/api/getTranscript?videoId=${encodeURIComponent(videoId)}`);
       if (!response.ok) {
         const error = await response.json().catch(() => ({}));
+        // CORS/network error handling
+        if (response.type === 'opaque' || response.status === 0) {
+          throw new Error('Network or CORS error: Unable to reach transcript API.');
+        }
         throw new Error(error.error || response.statusText);
       }
       const data = await response.json();

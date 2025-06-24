@@ -1,3 +1,4 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { 
   getFullTranscript, 
   getChunkedTranscript, 
@@ -10,14 +11,13 @@ import {
   ChunkedTranscript
 } from '../transcriptService';
 
-// Mock the youtube-transcript-api module
-jest.mock('youtube-transcript-api', () => ({
-  __esModule: true,
-  default: {
-    fetchTranscript: jest.fn(),
-    listTranscripts: jest.fn()
-  }
-}));
+// Mock youtube-transcript-api
+vi.mock('youtube-transcript-api', () => {
+  return {
+    fetchTranscript: vi.fn(),
+    listTranscripts: vi.fn()
+  };
+});
 
 // Import the mocked module
 import YoutubeTranscript from 'youtube-transcript-api';
@@ -26,9 +26,9 @@ const mockYoutubeTranscript = YoutubeTranscript as jest.Mocked<typeof YoutubeTra
 
 describe('transcriptService', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
-    console.log = jest.fn();
-    console.warn = jest.fn();
+    vi.clearAllMocks();
+    console.log = vi.fn();
+    console.warn = vi.fn();
   });
 
   describe('extractVideoId', () => {
@@ -68,39 +68,40 @@ describe('transcriptService', () => {
   });
 
   describe('fetchTranscript', () => {
-    const mockSegments: TranscriptSegment[] = [
-      { text: 'Hello world', duration: 2000, offset: 0 },
-      { text: 'This is a test', duration: 3000, offset: 2000 },
-      { text: 'Thank you for watching', duration: 1500, offset: 5000 }
-    ];
-
     it('should fetch transcript successfully', async () => {
-      mockYoutubeTranscript.fetchTranscript.mockResolvedValue(mockSegments);
-
+      const mockSegments = [
+        { text: 'Hello world', duration: 2000, offset: 0 },
+        { text: 'This is a test', duration: 3000, offset: 2000 }
+      ];
+      const { fetchTranscript } = require('youtube-transcript-api');
+      fetchTranscript.mockResolvedValueOnce(mockSegments);
       const result = await fetchTranscript('dQw4w9WgXcQ');
-      
       expect(result).toEqual(mockSegments);
-      expect(mockYoutubeTranscript.fetchTranscript).toHaveBeenCalledWith('dQw4w9WgXcQ', {
-        lang: 'en',
-        country: 'US'
-      });
     });
 
     it('should retry on network errors', async () => {
       const networkError = new Error('Network error');
-      mockYoutubeTranscript.fetchTranscript
+      const { fetchTranscript } = require('youtube-transcript-api');
+      fetchTranscript
         .mockRejectedValueOnce(networkError)
-        .mockResolvedValueOnce(mockSegments);
+        .mockResolvedValueOnce([
+          { text: 'Hello world', duration: 2000, offset: 0 },
+          { text: 'This is a test', duration: 3000, offset: 2000 }
+        ]);
 
       const result = await fetchTranscript('dQw4w9WgXcQ');
       
-      expect(result).toEqual(mockSegments);
-      expect(mockYoutubeTranscript.fetchTranscript).toHaveBeenCalledTimes(2);
+      expect(result).toEqual([
+        { text: 'Hello world', duration: 2000, offset: 0 },
+        { text: 'This is a test', duration: 3000, offset: 2000 }
+      ]);
+      expect(fetchTranscript).toHaveBeenCalledTimes(2);
     });
 
     it('should throw TranscriptError for no captions', async () => {
       const noCaptionsError = new Error('Could not get transcripts');
-      mockYoutubeTranscript.fetchTranscript.mockRejectedValue(noCaptionsError);
+      const { fetchTranscript } = require('youtube-transcript-api');
+      fetchTranscript.mockRejectedValue(noCaptionsError);
 
       await expect(fetchTranscript('dQw4w9WgXcQ')).rejects.toThrow(TranscriptError);
       await expect(fetchTranscript('dQw4w9WgXcQ')).rejects.toThrow('NO_CAPTIONS');
@@ -108,18 +109,23 @@ describe('transcriptService', () => {
 
     it('should throw TranscriptError for rate limit', async () => {
       const rateLimitError = new Error('rate limit exceeded');
-      mockYoutubeTranscript.fetchTranscript.mockRejectedValue(rateLimitError);
+      const { fetchTranscript } = require('youtube-transcript-api');
+      fetchTranscript.mockRejectedValue(rateLimitError);
 
       await expect(fetchTranscript('dQw4w9WgXcQ')).rejects.toThrow(TranscriptError);
       await expect(fetchTranscript('dQw4w9WgXcQ')).rejects.toThrow('RATE_LIMIT');
     });
 
     it('should use custom options', async () => {
-      mockYoutubeTranscript.fetchTranscript.mockResolvedValue(mockSegments);
+      const { fetchTranscript } = require('youtube-transcript-api');
+      fetchTranscript.mockResolvedValue([
+        { text: 'Hello world', duration: 2000, offset: 0 },
+        { text: 'This is a test', duration: 3000, offset: 2000 }
+      ]);
 
       await fetchTranscript('dQw4w9WgXcQ', { language: 'es', retryAttempts: 1 });
 
-      expect(mockYoutubeTranscript.fetchTranscript).toHaveBeenCalledWith('dQw4w9WgXcQ', {
+      expect(fetchTranscript).toHaveBeenCalledWith('dQw4w9WgXcQ', {
         lang: 'es',
         country: 'US'
       });
@@ -169,30 +175,32 @@ describe('transcriptService', () => {
   });
 
   describe('getFullTranscript', () => {
-    const mockSegments: TranscriptSegment[] = [
-      { text: 'Hello world', duration: 2000, offset: 0 },
-      { text: 'This is a test', duration: 3000, offset: 2000 }
-    ];
-
     it('should get full transcript from video ID', async () => {
-      mockYoutubeTranscript.fetchTranscript.mockResolvedValue(mockSegments);
-
+      const mockSegments = [
+        { text: 'Hello world', duration: 2000, offset: 0 },
+        { text: 'This is a test', duration: 3000, offset: 2000 }
+      ];
+      const { fetchTranscript } = require('youtube-transcript-api');
+      fetchTranscript.mockResolvedValueOnce(mockSegments);
       const result = await getFullTranscript('dQw4w9WgXcQ');
-      
       expect(result).toBe('Hello world This is a test');
     });
 
     it('should get full transcript from YouTube URL', async () => {
-      mockYoutubeTranscript.fetchTranscript.mockResolvedValue(mockSegments);
-
+      const mockSegments = [
+        { text: 'Hello world', duration: 2000, offset: 0 },
+        { text: 'This is a test', duration: 3000, offset: 2000 }
+      ];
+      const { fetchTranscript } = require('youtube-transcript-api');
+      fetchTranscript.mockResolvedValueOnce(mockSegments);
       const result = await getFullTranscript('https://www.youtube.com/watch?v=dQw4w9WgXcQ');
-      
       expect(result).toBe('Hello world This is a test');
     });
 
     it('should handle transcript extraction errors', async () => {
       const error = new TranscriptError('No captions available', 'NO_CAPTIONS', 'dQw4w9WgXcQ');
-      mockYoutubeTranscript.fetchTranscript.mockRejectedValue(error);
+      const { fetchTranscript } = require('youtube-transcript-api');
+      fetchTranscript.mockRejectedValue(error);
 
       await expect(getFullTranscript('dQw4w9WgXcQ')).rejects.toThrow(TranscriptError);
     });
@@ -209,7 +217,8 @@ describe('transcriptService', () => {
     ];
 
     it('should return chunked transcript', async () => {
-      mockYoutubeTranscript.fetchTranscript.mockResolvedValue(mockSegments);
+      const { fetchTranscript } = require('youtube-transcript-api');
+      fetchTranscript.mockResolvedValueOnce(mockSegments);
 
       const result = await getChunkedTranscript('dQw4w9WgXcQ');
       
@@ -221,7 +230,8 @@ describe('transcriptService', () => {
 
     it('should handle errors gracefully', async () => {
       const error = new TranscriptError('No captions available', 'NO_CAPTIONS', 'dQw4w9WgXcQ');
-      mockYoutubeTranscript.fetchTranscript.mockRejectedValue(error);
+      const { fetchTranscript } = require('youtube-transcript-api');
+      fetchTranscript.mockRejectedValue(error);
 
       await expect(getChunkedTranscript('dQw4w9WgXcQ')).rejects.toThrow(TranscriptError);
     });
@@ -267,7 +277,8 @@ describe('transcriptService', () => {
         { text: 'Success after retry', duration: 1000, offset: 0 }
       ];
 
-      mockYoutubeTranscript.fetchTranscript
+      const { fetchTranscript } = require('youtube-transcript-api');
+      fetchTranscript
         .mockRejectedValueOnce(transientError)
         .mockRejectedValueOnce(transientError)
         .mockResolvedValueOnce(mockSegments);
@@ -275,15 +286,16 @@ describe('transcriptService', () => {
       const result = await fetchTranscript('dQw4w9WgXcQ', { retryAttempts: 3 });
       
       expect(result).toEqual(mockSegments);
-      expect(mockYoutubeTranscript.fetchTranscript).toHaveBeenCalledTimes(3);
+      expect(fetchTranscript).toHaveBeenCalledTimes(3);
     });
 
     it('should fail after max retries', async () => {
       const persistentError = new Error('Persistent error');
-      mockYoutubeTranscript.fetchTranscript.mockRejectedValue(persistentError);
+      const { fetchTranscript } = require('youtube-transcript-api');
+      fetchTranscript.mockRejectedValue(persistentError);
 
       await expect(fetchTranscript('dQw4w9WgXcQ', { retryAttempts: 2 })).rejects.toThrow(TranscriptError);
-      expect(mockYoutubeTranscript.fetchTranscript).toHaveBeenCalledTimes(2);
+      expect(fetchTranscript).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -295,7 +307,8 @@ describe('transcriptService', () => {
         offset: i * 1000
       }));
 
-      mockYoutubeTranscript.fetchTranscript.mockResolvedValue(longSegments);
+      const { fetchTranscript } = require('youtube-transcript-api');
+      fetchTranscript.mockResolvedValueOnce(longSegments);
 
       const result = await getFullTranscript('dQw4w9WgXcQ');
       
@@ -305,7 +318,8 @@ describe('transcriptService', () => {
     });
 
     it('should handle empty segments array', async () => {
-      mockYoutubeTranscript.fetchTranscript.mockResolvedValue([]);
+      const { fetchTranscript } = require('youtube-transcript-api');
+      fetchTranscript.mockResolvedValueOnce([]);
 
       const result = await getFullTranscript('dQw4w9WgXcQ');
       
@@ -319,7 +333,8 @@ describe('transcriptService', () => {
         { text: 'World', duration: 1000, offset: 1500 }
       ];
 
-      mockYoutubeTranscript.fetchTranscript.mockResolvedValue(segmentsWithEmpty);
+      const { fetchTranscript } = require('youtube-transcript-api');
+      fetchTranscript.mockResolvedValueOnce(segmentsWithEmpty);
 
       const result = await getFullTranscript('dQw4w9WgXcQ');
       

@@ -29,9 +29,9 @@ async function getFullTranscript(videoId) {
       const caption = captionsList.data.items && captionsList.data.items[0];
       if (!caption) throw new Error('No captions found');
       const captionId = caption.id;
-      const res = await youtube.captions.download({ id: captionId, tfmt: 'srt' }, { responseType: 'stream' });
-      let srt = '';
-      for await (const chunk of res.data) srt += chunk;
+      // Download SRT as arraybuffer and convert to string
+      const res = await youtube.captions.download({ id: captionId, tfmt: 'srt' }, { responseType: 'arraybuffer' });
+      let srt = Buffer.from(res.data).toString('utf-8');
       // Parse SRT to plain text
       return srt.replace(/\d+\n\d{2}:\d{2}:\d{2},\d{3} --> .*\n/g, '').replace(/\n+/g, ' ').trim();
     } catch (apiErr) {
@@ -42,6 +42,7 @@ async function getFullTranscript(videoId) {
 }
 
 module.exports = async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
   const { videoId } = req.query;
   if (!videoId) {
     res.status(400).json({ error: 'Missing videoId' });

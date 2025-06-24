@@ -3,6 +3,7 @@ const fs = require('fs');
 const { createWorker } = require('tesseract.js');
 
 module.exports = async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
     return;
@@ -16,11 +17,11 @@ module.exports = async (req, res) => {
     }
     try {
       const file = files.file;
-      if (!file) {
+      if (!file || !file.path) {
         res.status(400).json({ error: 'No file uploaded.' });
         return;
       }
-      const imageBuffer = fs.readFileSync(file.filepath);
+      const imageBuffer = fs.readFileSync(file.path);
       const worker = await createWorker();
       await worker.loadLanguage('eng');
       await worker.initialize('eng');

@@ -342,215 +342,58 @@ const extractArticleFallback = async (
 };
 
 /**
- * Extracts text content from a PDF file
- * @param fileOrBuffer - PDF file or buffer
- * @param fileName - Original file name
- * @param options - Extraction options
- * @returns Promise<ExtractionResult> - Extracted content and metadata
+ * Extracts text content from a PDF file using the serverless API
+ * @param file - PDF File
+ * @returns Promise<string> - Extracted text content
  */
-export const extractPdf = async (
-  fileOrBuffer: File | Buffer,
-  fileName: string,
-  options: ExtractionOptions = {}
-): Promise<ExtractionResult> => {
-  const startTime = Date.now();
-
+export const extractPDFContent = async (file: File): Promise<string> => {
+  const formData = new FormData();
+  formData.append('file', file);
   try {
-    console.log(`Extracting PDF content from: ${fileName}`);
-
-    // Browser: upload to server-side API
-    if (isBrowser) {
-      if (!(fileOrBuffer instanceof File)) {
-        throw new ContentExtractionError(
-          'In the browser, extractPdf expects a File object.',
-          'UNSUPPORTED_FORMAT',
-          fileName
-        );
+    const response = await fetch('/api/extractPdf', {
+      method: 'POST',
+      body: formData,
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      if (response.type === 'opaque' || response.status === 0) {
+        throw new Error('Network or CORS error: Unable to reach PDF extraction API.');
       }
-      const formData = new FormData();
-      formData.append('file', fileOrBuffer, fileName);
-      const response = await fetch('/api/extractPdf', {
-        method: 'POST',
-        body: formData,
-      });
-      if (!response.ok) {
-        const error = await response.json().catch(() => ({}));
-        throw new ContentExtractionError(
-          `Server extraction failed: ${error.error || response.statusText}`,
-          'EXTRACTION_FAILED',
-          fileName
-        );
-      }
-      const data = await response.json();
-      let content = (data.text || '').trim();
-      if (!content) {
-        throw new ContentExtractionError(
-          'No text content found in PDF. The file may be image-based or corrupted.',
-          'EXTRACTION_FAILED',
-          fileName
-        );
-      }
-      const maxLength = options.maxContentLength || EXTRACTION_CONFIG.maxContentLength;
-      if (content.length > maxLength) {
-        content = content.substring(0, maxLength) + '...';
-      }
-      const extractionTime = Date.now() - startTime;
-      return {
-        content,
-        metadata: {
-          sourceType: 'pdf',
-          fileName,
-          fileSize: fileOrBuffer.size,
-          extractionTime,
-          contentLength: content.length,
-        },
-      };
+      throw new Error(error.error || response.statusText);
     }
-
-    // Server: use pdf-parse
-    const fileBuffer = fileOrBuffer as Buffer;
-    if (!pdf) {
-      throw new ContentExtractionError(
-        'PDF text extraction is not available. Please install pdf-parse.',
-        'UNSUPPORTED_FORMAT',
-        fileName
-      );
-    }
-    const data = await pdf(fileBuffer);
-    if (!data.text || data.text.trim().length === 0) {
-      throw new ContentExtractionError(
-        'No text content found in PDF. The file may be image-based or corrupted.',
-        'EXTRACTION_FAILED',
-        fileName
-      );
-    }
-    let content = data.text.trim();
-    const maxLength = options.maxContentLength || EXTRACTION_CONFIG.maxContentLength;
-    if (content.length > maxLength) {
-      content = content.substring(0, maxLength) + '...';
-    }
-    const extractionTime = Date.now() - startTime;
-    return {
-      content,
-      metadata: {
-        sourceType: 'pdf',
-        fileName,
-        fileSize: fileBuffer.length,
-        extractionTime,
-        contentLength: content.length,
-        language: data.language || undefined,
-      },
-    };
-  } catch (error) {
-    console.error('PDF extraction failed:', error);
-    if (error instanceof ContentExtractionError) {
-      throw error;
-    }
-    throw new ContentExtractionError(
-      `Failed to extract PDF content: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      'EXTRACTION_FAILED',
-      fileName
-    );
+    const data = await response.json();
+    if (!data.text) throw new Error('No text returned from PDF extraction API');
+    return data.text;
+  } catch (err) {
+    throw new Error(`Failed to extract PDF content: ${err instanceof Error ? err.message : 'Unknown error'}`);
   }
 };
 
 /**
- * Extracts text content from an image using OCR
- * @param imageFile - Image file
- * @param options - Extraction options
- * @returns Promise<ExtractionResult> - Extracted content and metadata
+ * Extracts text content from an image using OCR via the serverless API
+ * @param file - Image File
+ * @returns Promise<string> - Extracted text content
  */
-export const extractImageText = async (
-  imageFile: File,
-  options: ExtractionOptions = {}
-): Promise<ExtractionResult> => {
-  const startTime = Date.now();
-  
+export const extractImageText = async (file: File): Promise<string> => {
+  const formData = new FormData();
+  formData.append('file', file);
   try {
-    console.log(`Extracting text from image: ${imageFile.name}`);
-    
-    // Validate file type
-    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/bmp', 'image/tiff'];
-    if (!validTypes.includes(imageFile.type)) {
-      throw new ContentExtractionError(
-        `Unsupported image format: ${imageFile.type}. Supported formats: ${validTypes.join(', ')}`,
-        'UNSUPPORTED_FORMAT',
-        imageFile.name
-      );
-    }
-    
-    // Convert file to buffer
-    const arrayBuffer = await imageFile.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    
-    // Create Tesseract worker
-    const worker = await createWorker();
-    
-    try {
-      // Initialize worker with English language
-      await worker.loadLanguage('eng');
-      await worker.initialize('eng');
-      
-      // Set worker parameters for better accuracy
-      await worker.setParameters({
-        tessedit_char_whitelist: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz.,!?;:()[]{}"\'- ',
-        tessedit_pageseg_mode: '1', // Automatic page segmentation
-        tessedit_ocr_engine_mode: '3', // Default OCR engine
-      });
-      
-      // Perform OCR
-      const { data } = await worker.recognize(buffer);
-      
-      if (!data.text || data.text.trim().length === 0) {
-        throw new ContentExtractionError(
-          'No text content found in image. The image may not contain readable text.',
-          'EXTRACTION_FAILED',
-          imageFile.name
-        );
+    const response = await fetch('/api/extractImage', {
+      method: 'POST',
+      body: formData,
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      if (response.type === 'opaque' || response.status === 0) {
+        throw new Error('Network or CORS error: Unable to reach image extraction API.');
       }
-      
-      // Clean and truncate content if necessary
-      let content = data.text.trim();
-      const maxLength = options.maxContentLength || EXTRACTION_CONFIG.maxContentLength;
-      
-      if (content.length > maxLength) {
-        console.warn(`Content truncated from ${content.length} to ${maxLength} characters`);
-        content = content.substring(0, maxLength) + '...';
-      }
-      
-      const extractionTime = Date.now() - startTime;
-      
-      console.log(`Successfully extracted ${content.length} characters in ${extractionTime}ms`);
-      
-      return {
-        content,
-        metadata: {
-          sourceType: 'image',
-          fileName: imageFile.name,
-          fileSize: imageFile.size,
-          extractionTime,
-          contentLength: content.length,
-          language: 'en' // Tesseract was initialized with English
-        }
-      };
-      
-    } finally {
-      // Always terminate the worker
-      await worker.terminate();
+      throw new Error(error.error || response.statusText);
     }
-    
-  } catch (error) {
-    console.error('Image OCR extraction failed:', error);
-    
-    if (error instanceof ContentExtractionError) {
-      throw error;
-    }
-    
-    throw new ContentExtractionError(
-      `Failed to extract text from image: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      'EXTRACTION_FAILED',
-      imageFile.name
-    );
+    const data = await response.json();
+    if (!data.text) throw new Error('No text returned from image extraction API');
+    return data.text;
+  } catch (err) {
+    throw new Error(`Failed to extract image text: ${err instanceof Error ? err.message : 'Unknown error'}`);
   }
 };
 

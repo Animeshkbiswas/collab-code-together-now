@@ -8,7 +8,7 @@ import {
 } from './transcriptService';
 import {
   extractArticle,
-  extractPdf,
+  extractPDFContent,
   extractImageText,
   validateUrl,
   validatePdfFile,
@@ -307,7 +307,7 @@ const extractTextFromFile = async (file: File, options: ExtractionOptions = {}):
             console.log('Processing PDF file');
             const arrayBuffer = await file.arrayBuffer();
             const buffer = Buffer.from(arrayBuffer);
-            const result = await extractPdf(buffer, file.name, options);
+            const result = await extractPDFContent(buffer, file.name, options);
             return result.content;
         }
 
@@ -394,27 +394,25 @@ export const generateSummary = async (request: SummaryRequest): Promise<SummaryR
                 if (!request.url) {
                     throw new Error('URL is required for URL summarization');
                 }
-                const urlResult = await extractContentFromUrl(request.url, request.extractionOptions);
-                content = urlResult;
-                extractedContent = urlResult;
+                const articleResult = await extractArticle(request.url);
+                content = articleResult.content;
+                extractedContent = content;
                 sourceType = 'website';
                 break;
             case 'file':
                 if (!request.file) {
                     throw new Error('File is required for file summarization');
                 }
-                const fileResult = await extractTextFromFile(request.file, request.extractionOptions);
-                content = fileResult;
-                extractedContent = fileResult;
+                content = await extractPDFContent(request.file);
+                extractedContent = content;
                 sourceType = 'document';
                 break;
             case 'image':
                 if (!request.imageFile) {
                     throw new Error('Image file is required for image summarization');
                 }
-                const imageResult = await extractTextFromImage(request.imageFile, request.extractionOptions);
-                content = imageResult;
-                extractedContent = imageResult;
+                content = await extractImageText(request.imageFile);
+                extractedContent = content;
                 sourceType = 'image';
                 break;
             case 'youtube':

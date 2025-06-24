@@ -1,6 +1,7 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { 
   extractArticle, 
-  extractPdf, 
+  extractPDFContent, 
   extractImageText, 
   validateUrl, 
   validatePdfFile, 
@@ -10,64 +11,62 @@ import {
   ExtractionOptions 
 } from '../contentExtractionService';
 
-// Mock the external libraries
-jest.mock('@mozilla/readability', () => ({
-  Readability: jest.fn().mockImplementation(() => ({
-    parse: jest.fn().mockReturnValue({
-      textContent: 'Mock article content extracted from website',
-      language: 'en'
-    })
-  }))
-}));
-
-jest.mock('jsdom', () => ({
-  JSDOM: jest.fn().mockImplementation(() => ({
-    window: {
-      document: {}
+// Mock Readability
+vi.mock('@mozilla/readability', () => {
+  return {
+    Readability: class {
+      parse = vi.fn().mockReturnValue({
+        textContent: 'Mock article content extracted from website',
+        language: 'en'
+      });
     }
-  }))
-}));
+  };
+});
 
-jest.mock('pdf-parse', () => jest.fn().mockResolvedValue({
-  text: 'Mock PDF content extracted from file',
-  language: 'en'
-}));
+// Mock jsdom
+vi.mock('jsdom', () => {
+  return {
+    JSDOM: vi.fn().mockImplementation(() => ({
+      window: { document: {} }
+    }))
+  };
+});
 
-jest.mock('tesseract.js', () => ({
-  createWorker: jest.fn().mockResolvedValue({
-    loadLanguage: jest.fn().mockResolvedValue(undefined),
-    initialize: jest.fn().mockResolvedValue(undefined),
-    setParameters: jest.fn().mockResolvedValue(undefined),
-    recognize: jest.fn().mockResolvedValue({
-      data: {
-        text: 'Mock text extracted from image'
-      }
-    }),
-    terminate: jest.fn().mockResolvedValue(undefined)
-  })
-}));
+// Mock pdf-parse
+vi.mock('pdf-parse', () => {
+  const fn = vi.fn().mockResolvedValue({ text: 'Mock PDF content extracted from file', language: 'en' });
+  return { __esModule: true, default: fn };
+});
+
+// Mock tesseract.js
+vi.mock('tesseract.js', () => {
+  return {
+    createWorker: vi.fn().mockResolvedValue({
+      loadLanguage: vi.fn().mockResolvedValue(undefined),
+      initialize: vi.fn().mockResolvedValue(undefined),
+      setParameters: vi.fn().mockResolvedValue(undefined),
+      recognize: vi.fn().mockResolvedValue({ data: { text: 'Mock text extracted from image' } }),
+      terminate: vi.fn().mockResolvedValue(undefined)
+    })
+  };
+});
 
 // Mock fetch globally
-global.fetch = jest.fn();
+global.fetch = vi.fn();
 
 describe('Content Extraction Service', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('extractArticle', () => {
     it('should extract article content from a valid URL', async () => {
-      const mockHtml = '<html><body><article>Test content</article></body></html>';
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
+      (global.fetch as any).mockResolvedValueOnce({
         ok: true,
-        headers: {
-          get: jest.fn().mockReturnValue('text/html; charset=utf-8')
-        },
-        text: jest.fn().mockResolvedValue(mockHtml)
+        headers: { get: vi.fn().mockReturnValue('text/html; charset=utf-8') },
+        text: vi.fn().mockResolvedValue('<html><body><article>Test content</article></body></html>')
       });
-
       const result = await extractArticle('https://example.com/article');
-
       expect(result.content).toBe('Mock article content extracted from website');
       expect(result.metadata.sourceType).toBe('website');
       expect(result.metadata.url).toBe('https://example.com/article');
@@ -75,15 +74,15 @@ describe('Content Extraction Service', () => {
     });
 
     it('should handle network errors with retry logic', async () => {
-      (global.fetch as jest.Mock)
+      (global.fetch as vi.Mock)
         .mockRejectedValueOnce(new Error('Network error'))
         .mockRejectedValueOnce(new Error('Network error'))
         .mockResolvedValueOnce({
           ok: true,
           headers: {
-            get: jest.fn().mockReturnValue('text/html; charset=utf-8')
+            get: vi.fn().mockReturnValue('text/html; charset=utf-8')
           },
-          text: jest.fn().mockResolvedValue('<html><body>Content</body></html>')
+          text: vi.fn().mockResolvedValue('<html><body>Content</body></html>')
         });
 
       const result = await extractArticle('https://example.com/article');
@@ -93,12 +92,12 @@ describe('Content Extraction Service', () => {
     });
 
     it('should throw ContentExtractionError for invalid content type', async () => {
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
+      (global.fetch as vi.Mock).mockResolvedValueOnce({
         ok: true,
         headers: {
-          get: jest.fn().mockReturnValue('application/json')
+          get: vi.fn().mockReturnValue('application/json')
         },
-        text: jest.fn().mockResolvedValue('{"data": "json"}')
+        text: vi.fn().mockResolvedValue('{"data": "json"}')
       });
 
       await expect(extractArticle('https://example.com/api'))
@@ -107,7 +106,7 @@ describe('Content Extraction Service', () => {
     });
 
     it('should throw ContentExtractionError for HTTP errors', async () => {
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
+      (global.fetch as vi.Mock).mockResolvedValueOnce({
         ok: false,
         status: 404,
         statusText: 'Not Found'
@@ -120,17 +119,17 @@ describe('Content Extraction Service', () => {
 
     it('should respect content length limits', async () => {
       const longContent = 'A'.repeat(200000); // 200KB content
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
+      (global.fetch as vi.Mock).mockResolvedValueOnce({
         ok: true,
         headers: {
-          get: jest.fn().mockReturnValue('text/html; charset=utf-8')
+          get: vi.fn().mockReturnValue('text/html; charset=utf-8')
         },
-        text: jest.fn().mockResolvedValue('<html><body>Content</body></html>')
+        text: vi.fn().mockResolvedValue('<html><body>Content</body></html>')
       });
 
       const { Readability } = require('@mozilla/readability');
       Readability.mockImplementationOnce(() => ({
-        parse: jest.fn().mockReturnValue({
+        parse: vi.fn().mockReturnValue({
           textContent: longContent,
           language: 'en'
         })
@@ -145,18 +144,15 @@ describe('Content Extraction Service', () => {
     });
   });
 
-  describe('extractPdf', () => {
-    it('should extract text content from PDF buffer', async () => {
-      const mockBuffer = Buffer.from('mock pdf content');
-      const fileName = 'test.pdf';
-
-      const result = await extractPdf(mockBuffer, fileName);
-
-      expect(result.content).toBe('Mock PDF content extracted from file');
-      expect(result.metadata.sourceType).toBe('pdf');
-      expect(result.metadata.fileName).toBe(fileName);
-      expect(result.metadata.fileSize).toBe(mockBuffer.length);
-      expect(result.metadata.language).toBe('en');
+  describe('extractPDFContent', () => {
+    it('should extract text content from PDF file', async () => {
+      const mockFile = new File(['dummy'], 'test.pdf', { type: 'application/pdf' });
+      (global.fetch as any).mockResolvedValueOnce({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ text: 'Mock PDF content extracted from file' })
+      });
+      const result = await extractPDFContent(mockFile);
+      expect(result).toBe('Mock PDF content extracted from file');
     });
 
     it('should throw ContentExtractionError for empty PDF content', async () => {
@@ -169,7 +165,7 @@ describe('Content Extraction Service', () => {
         language: 'en'
       });
 
-      await expect(extractPdf(mockBuffer, fileName))
+      await expect(extractPDFContent(mockBuffer, fileName))
         .rejects
         .toThrow(ContentExtractionError);
     });
@@ -181,7 +177,7 @@ describe('Content Extraction Service', () => {
       const pdf = require('pdf-parse');
       pdf.mockRejectedValueOnce(new Error('PDF parsing failed'));
 
-      await expect(extractPdf(mockBuffer, fileName))
+      await expect(extractPDFContent(mockBuffer, fileName))
         .rejects
         .toThrow(ContentExtractionError);
     });
@@ -189,17 +185,13 @@ describe('Content Extraction Service', () => {
 
   describe('extractImageText', () => {
     it('should extract text from valid image file', async () => {
-      const mockFile = new File(['mock image data'], 'test.jpg', {
-        type: 'image/jpeg'
+      const mockFile = new File(['dummy'], 'test.png', { type: 'image/png' });
+      (global.fetch as any).mockResolvedValueOnce({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ text: 'Mock text extracted from image' })
       });
-
       const result = await extractImageText(mockFile);
-
-      expect(result.content).toBe('Mock text extracted from image');
-      expect(result.metadata.sourceType).toBe('image');
-      expect(result.metadata.fileName).toBe('test.jpg');
-      expect(result.metadata.fileSize).toBe(mockFile.size);
-      expect(result.metadata.language).toBe('en');
+      expect(result).toBe('Mock text extracted from image');
     });
 
     it('should throw ContentExtractionError for unsupported image format', async () => {
@@ -219,15 +211,15 @@ describe('Content Extraction Service', () => {
 
       const { createWorker } = require('tesseract.js');
       createWorker.mockResolvedValueOnce({
-        loadLanguage: jest.fn().mockResolvedValue(undefined),
-        initialize: jest.fn().mockResolvedValue(undefined),
-        setParameters: jest.fn().mockResolvedValue(undefined),
-        recognize: jest.fn().mockResolvedValue({
+        loadLanguage: vi.fn().mockResolvedValue(undefined),
+        initialize: vi.fn().mockResolvedValue(undefined),
+        setParameters: vi.fn().mockResolvedValue(undefined),
+        recognize: vi.fn().mockResolvedValue({
           data: {
             text: ''
           }
         }),
-        terminate: jest.fn().mockResolvedValue(undefined)
+        terminate: vi.fn().mockResolvedValue(undefined)
       });
 
       await expect(extractImageText(mockFile))
@@ -253,13 +245,13 @@ describe('Content Extraction Service', () => {
         type: 'image/jpeg'
       });
 
-      const mockTerminate = jest.fn().mockResolvedValue(undefined);
+      const mockTerminate = vi.fn().mockResolvedValue(undefined);
       const { createWorker } = require('tesseract.js');
       createWorker.mockResolvedValueOnce({
-        loadLanguage: jest.fn().mockResolvedValue(undefined),
-        initialize: jest.fn().mockResolvedValue(undefined),
-        setParameters: jest.fn().mockResolvedValue(undefined),
-        recognize: jest.fn().mockRejectedValue(new Error('OCR failed')),
+        loadLanguage: vi.fn().mockResolvedValue(undefined),
+        initialize: vi.fn().mockResolvedValue(undefined),
+        setParameters: vi.fn().mockResolvedValue(undefined),
+        recognize: vi.fn().mockRejectedValue(new Error('OCR failed')),
         terminate: mockTerminate
       });
 
@@ -273,10 +265,10 @@ describe('Content Extraction Service', () => {
 
   describe('validateUrl', () => {
     it('should return true for valid HTML URL', async () => {
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
+      (global.fetch as vi.Mock).mockResolvedValueOnce({
         ok: true,
         headers: {
-          get: jest.fn().mockReturnValue('text/html; charset=utf-8')
+          get: vi.fn().mockReturnValue('text/html; charset=utf-8')
         }
       });
 
@@ -286,10 +278,10 @@ describe('Content Extraction Service', () => {
     });
 
     it('should return false for non-HTML URL', async () => {
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
+      (global.fetch as vi.Mock).mockResolvedValueOnce({
         ok: true,
         headers: {
-          get: jest.fn().mockReturnValue('application/json')
+          get: vi.fn().mockReturnValue('application/json')
         }
       });
 
@@ -299,7 +291,7 @@ describe('Content Extraction Service', () => {
     });
 
     it('should return false for network errors', async () => {
-      (global.fetch as jest.Mock).mockRejectedValueOnce(new Error('Network error'));
+      (global.fetch as vi.Mock).mockRejectedValueOnce(new Error('Network error'));
 
       const result = await validateUrl('https://example.com');
 
@@ -307,7 +299,7 @@ describe('Content Extraction Service', () => {
     });
 
     it('should return false for HTTP errors', async () => {
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
+      (global.fetch as vi.Mock).mockResolvedValueOnce({
         ok: false,
         status: 404
       });
@@ -439,12 +431,12 @@ describe('Content Extraction Service', () => {
   describe('Extraction Options', () => {
     it('should respect custom timeout option', async () => {
       const mockHtml = '<html><body>Content</body></html>';
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
+      (global.fetch as vi.Mock).mockResolvedValueOnce({
         ok: true,
         headers: {
-          get: jest.fn().mockReturnValue('text/html; charset=utf-8')
+          get: vi.fn().mockReturnValue('text/html; charset=utf-8')
         },
-        text: jest.fn().mockResolvedValue(mockHtml)
+        text: vi.fn().mockResolvedValue(mockHtml)
       });
 
       const options: ExtractionOptions = {
@@ -467,17 +459,17 @@ describe('Content Extraction Service', () => {
 
     it('should respect custom content length limit', async () => {
       const longContent = 'A'.repeat(100000);
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
+      (global.fetch as vi.Mock).mockResolvedValueOnce({
         ok: true,
         headers: {
-          get: jest.fn().mockReturnValue('text/html; charset=utf-8')
+          get: vi.fn().mockReturnValue('text/html; charset=utf-8')
         },
-        text: jest.fn().mockResolvedValue('<html><body>Content</body></html>')
+        text: vi.fn().mockResolvedValue('<html><body>Content</body></html>')
       });
 
       const { Readability } = require('@mozilla/readability');
       Readability.mockImplementationOnce(() => ({
-        parse: jest.fn().mockReturnValue({
+        parse: vi.fn().mockReturnValue({
           textContent: longContent,
           language: 'en'
         })
@@ -499,15 +491,15 @@ describe('Content Extraction Service', () => {
       const mockHtml = '<html><body>Content</body></html>';
       
       // First two attempts fail with timeout
-      (global.fetch as jest.Mock)
+      (global.fetch as vi.Mock)
         .mockRejectedValueOnce(new Error('AbortError'))
         .mockRejectedValueOnce(new Error('AbortError'))
         .mockResolvedValueOnce({
           ok: true,
           headers: {
-            get: jest.fn().mockReturnValue('text/html; charset=utf-8')
+            get: vi.fn().mockReturnValue('text/html; charset=utf-8')
           },
-          text: jest.fn().mockResolvedValue(mockHtml)
+          text: vi.fn().mockResolvedValue(mockHtml)
         });
 
       const startTime = Date.now();
@@ -522,15 +514,15 @@ describe('Content Extraction Service', () => {
     it('should handle network errors with retry', async () => {
       const mockHtml = '<html><body>Content</body></html>';
       
-      (global.fetch as jest.Mock)
+      (global.fetch as vi.Mock)
         .mockRejectedValueOnce(new Error('Failed to fetch'))
         .mockRejectedValueOnce(new Error('NetworkError'))
         .mockResolvedValueOnce({
           ok: true,
           headers: {
-            get: jest.fn().mockReturnValue('text/html; charset=utf-8')
+            get: vi.fn().mockReturnValue('text/html; charset=utf-8')
           },
-          text: jest.fn().mockResolvedValue(mockHtml)
+          text: vi.fn().mockResolvedValue(mockHtml)
         });
 
       const result = await extractArticle('https://example.com/article');
@@ -540,7 +532,7 @@ describe('Content Extraction Service', () => {
     });
 
     it('should throw error after max retry attempts', async () => {
-      (global.fetch as jest.Mock)
+      (global.fetch as vi.Mock)
         .mockRejectedValue(new Error('Network error'));
 
       await expect(extractArticle('https://example.com/article'))
