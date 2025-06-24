@@ -4,6 +4,14 @@
     {
       "src": "/api/getTranscript",
       "dest": "/api/getTranscript.cjs"
+    },
+    {
+      "src": "/api/extractPdf",
+      "dest": "/api/extractPdf.cjs"
+    },
+    {
+      "src": "/api/extractImage",
+      "dest": "/api/extractImage.cjs"
     }
   ],
   "env": {
